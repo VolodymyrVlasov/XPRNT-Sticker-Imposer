@@ -48,6 +48,10 @@ class ShapeArtworkInfo:
     page_count: int
     subpaths: list[ContourSubpath]  # coordinates relative to the dim_w x dim_h tile,
     # i.e. already inset by bleed_mm on every side
+    bleed_box_pt: tuple[float, float, float, float]  # (x0, y0, x1, y1) — the cut
+    # contour's bbox expanded by the bleed on every side, in the SOURCE PDF's own
+    # point space (not mm, not yet re-based to the tile's own origin) — this is
+    # exactly the region extract_raster_only_pdf should crop the artwork to.
 
 
 def _points_close(a, b) -> bool:
@@ -108,10 +112,18 @@ def _group_subpaths_pt(items: list) -> list[list[tuple]]:
     return subpaths
 
 
-def extract_raster_only_pdf(path: str, output_path: str) -> None:
-    """Write a copy of page 0 containing only its raster image(s), same page size,
-    same image placement, with all vector paths stripped — this is what gets tiled
-    into the print PDF, since the cut-contour vector lines must never be printed.
+def extract_raster_only_pdf(
+    path: str, output_path: str, bleed_box_pt: tuple[float, float, float, float],
+) -> None:
+    """Write a copy of page 0's raster image(s), CROPPED to `bleed_box_pt` (the
+    cut contour's bbox expanded by the bleed, in the source PDF's own point
+    space — see ShapeArtworkInfo.bleed_box_pt), with all vector paths stripped.
+
+    The new page is sized exactly to that box, and images are re-inserted
+    shifted so the box's own origin becomes (0, 0) — this is what gets tiled
+    into the print PDF, since the cut-contour vector lines must never be
+    printed, and the artwork must not be padded by any extra canvas margin the
+    source page happened to have around the actual bleed-inclusive tile.
     """
     import fitz  # PyMuPDF
 
@@ -128,13 +140,17 @@ def extract_raster_only_pdf(path: str, output_path: str) -> None:
                 "додайте зображення для друку як растровий об'єкт"
             )
 
+        box_x0, box_y0, box_x1, box_y1 = bleed_box_pt
+
         out = fitz.open()
         try:
-            new_page = out.new_page(width=page.rect.width, height=page.rect.height)
+            new_page = out.new_page(width=box_x1 - box_x0, height=box_y1 - box_y0)
             for info in images_info:
                 xref = info["xref"]
                 img_bytes = src.extract_image(xref)["image"]
-                new_page.insert_image(fitz.Rect(info["bbox"]), stream=img_bytes)
+                bx0, by0, bx1, by1 = info["bbox"]
+                cropped_rect = fitz.Rect(bx0 - box_x0, by0 - box_y0, bx1 - box_x0, by1 - box_y0)
+                new_page.insert_image(cropped_rect, stream=img_bytes)
             out.save(output_path)
         finally:
             out.close()
@@ -179,11 +195,18 @@ def inspect_shape_pdf(path: str) -> ShapeArtworkInfo:
         bleed_pt = SHAPE_BLEED_MM * MM
         offset_x = raw_bbox.x0 - bleed_pt
         offset_y = raw_bbox.y0 - bleed_pt
+        bleed_box_pt = (offset_x, offset_y, raw_bbox.x1 + bleed_pt, raw_bbox.y1 + bleed_pt)
 
         contour_w_mm = raw_bbox.width / MM
         contour_h_mm = raw_bbox.height / MM
-        dim_w = contour_w_mm + 2 * SHAPE_BLEED_MM
-        dim_h = contour_h_mm + 2 * SHAPE_BLEED_MM
+        # Round here, at the single source of truth both /api/analyze-shape and
+        # /api/generate-shape call — otherwise PDF-roundtrip float noise (e.g.
+        # 42.00000859830114) makes fmt_dim() treat whole numbers as fractional
+        # and print filenames like "32.0x42.0" instead of "32x42". Sub-0.01mm
+        # noise in the subpath coordinates themselves is well under cutting
+        # precision and doesn't need the same treatment.
+        dim_w = round(contour_w_mm + 2 * SHAPE_BLEED_MM, 2)
+        dim_h = round(contour_h_mm + 2 * SHAPE_BLEED_MM, 2)
 
         def to_mm(p) -> tuple[float, float]:
             return ((p.x - offset_x) / MM, (p.y - offset_y) / MM)
@@ -216,6 +239,7 @@ def inspect_shape_pdf(path: str) -> ShapeArtworkInfo:
             bleed_mm=SHAPE_BLEED_MM,
             page_count=doc.page_count,
             subpaths=subpaths,
+            bleed_box_pt=bleed_box_pt,
         )
     finally:
         doc.close()
