@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from server.routes import analyze, analyze_shape, config, generate, generate_batch, layout, session
+from server.routes import analyze, analyze_shape, config, generate, generate_batch, generate_shape, layout, session
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(PROJECT_ROOT, "web")
@@ -16,6 +16,7 @@ app.include_router(analyze_shape.router)
 app.include_router(layout.router)
 app.include_router(generate.router)
 app.include_router(generate_batch.router)
+app.include_router(generate_shape.router)
 app.include_router(session.router)
 
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

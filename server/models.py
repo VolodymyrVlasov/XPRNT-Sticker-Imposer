@@ -96,6 +96,25 @@ class ShapeAnalyzeResponse(BaseModel):
     contour: ContourGeometry
 
 
+class ShapeGenerateRequest(BaseModel):
+    upload_id: str
+    sheet_name: str
+    sheet_w: float = Field(gt=0)
+    sheet_h: float = Field(gt=0)
+    mark_offset: float = Field(ge=0)
+    field_margin: float = Field(ge=0)
+    orientation: str | None = None
+    cols: int | None = Field(default=None, ge=0)
+    rows: int | None = Field(default=None, ge=0)
+    order: str
+    material: str
+    quantity: int = Field(gt=0)
+    cut_contour: bool = False
+    # No dim_w/dim_h/gap/deform — the server re-derives the authoritative size
+    # and contour by re-running inspect_shape_pdf on the stored upload, and
+    # gap is always 0 for this mode.
+
+
 class BatchGenerateRequest(BaseModel):
     items: list[BatchItem]
     sheet_name: str
