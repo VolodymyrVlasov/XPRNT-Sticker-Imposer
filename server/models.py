@@ -115,6 +115,27 @@ class ShapeGenerateRequest(BaseModel):
     # gap is always 0 for this mode.
 
 
+class ShapeBatchItem(BaseModel):
+    upload_id: str
+
+
+class ShapeBatchGenerateRequest(BaseModel):
+    items: list[ShapeBatchItem]
+    sheet_name: str
+    sheet_w: float = Field(gt=0)
+    sheet_h: float = Field(gt=0)
+    mark_offset: float = Field(ge=0)
+    field_margin: float = Field(ge=0)
+    orientation: str | None = None
+    order: str
+    material: str
+    quantity: int = Field(gt=0)
+    cut_contour: bool = False
+    # No per-item dim_w/dim_h — re-derived server-side per item, same as
+    # ShapeGenerateRequest. No cols/rows override — batch mode auto-fits per
+    # item only, matching the rectangular batch flow. No gap/deform.
+
+
 class BatchGenerateRequest(BaseModel):
     items: list[BatchItem]
     sheet_name: str

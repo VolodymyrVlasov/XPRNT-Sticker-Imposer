@@ -44,6 +44,25 @@ def build_shape_zip(
             zf.write(contour_pdf_path, arcname=os.path.basename(contour_pdf_path))
 
 
+def build_shape_batch_zip(zip_path: str, items: list[dict]) -> None:
+    """Everything flat at the zip root, no subfolders — same convention as
+    build_shape_zip, just looped over N items. No dedup: unlike the
+    rectangular batch flow, every item always gets its own files (two shaped
+    stickers can share a bounding box while being completely different cut
+    shapes), so this simply writes whatever each item's caller produced.
+
+    Each entry in `items`: {"print_pdf": path, "plt": path,
+    "contour_pdf": path | None}.
+    """
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for item in items:
+            zf.write(item["print_pdf"], arcname=os.path.basename(item["print_pdf"]))
+            zf.write(item["plt"], arcname=os.path.basename(item["plt"]))
+            contour_pdf = item.get("contour_pdf")
+            if contour_pdf:
+                zf.write(contour_pdf, arcname=os.path.basename(contour_pdf))
+
+
 def build_batch_zip(
     zip_path: str,
     print_pdf_paths: list[str],
