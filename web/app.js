@@ -286,7 +286,7 @@ async function handleSingleFile(file) {
     newTaskBtn.hidden = false;
 
     renderLayout(currentLayout, analysis, !aspectLocked);
-    setStatus(shapeMode ? "Генерація файлів для фігурних стікерів буде додана на наступному етапі" : "", "");
+    setStatus("", "");
   } catch (err) {
     setStatus(String(err.message || err), "error");
   }
@@ -481,16 +481,23 @@ function debounce(fn, ms) {
   };
 }
 
+// Cols/rows fields always display the current grid so they're editable in
+// place, but they only override the server's auto-fit once the user has
+// actually touched them — otherwise every other field edit would "freeze"
+// the grid at its last displayed size instead of re-optimizing. Shared by
+// collectLayoutInput() and generateShapeSingle() so a generate request can
+// never drift from the grid /api/layout already confirmed fits.
+function resolveManualGrid() {
+  const cols = parseInt(colsInput.value, 10);
+  const rows = parseInt(rowsInput.value, 10);
+  const useManualGrid = gridManual && Number.isFinite(cols) && cols > 0 && Number.isFinite(rows) && rows > 0;
+  return { cols: useManualGrid ? cols : null, rows: useManualGrid ? rows : null };
+}
+
 function collectLayoutInput() {
   const sheetW = parseFloat(sheetWInput.value);
   const sheetH = parseFloat(sheetHInput.value);
-  const cols = parseInt(colsInput.value, 10);
-  const rows = parseInt(rowsInput.value, 10);
-  // Cols/rows fields always display the current grid so they're editable in
-  // place, but they only override the server's auto-fit once the user has
-  // actually touched them — otherwise every other field edit would "freeze"
-  // the grid at its last displayed size instead of re-optimizing.
-  const useManualGrid = gridManual && Number.isFinite(cols) && cols > 0 && Number.isFinite(rows) && rows > 0;
+  const { cols, rows } = resolveManualGrid();
   // Shape mode has no size inputs — dim_w/dim_h always come straight from the
   // analyzed file (they already include the bleed).
   const dimW = shapeMode ? analysis.dim_w : (parseFloat(stickerWInput.value) || analysis.dim_w);
@@ -504,8 +511,8 @@ function collectLayoutInput() {
     field_margin: parseFloat(fieldMarginInput.value) || 0,
     gap: 0,
     orientation: orientationSelect.value || null,
-    cols: useManualGrid ? cols : null,
-    rows: useManualGrid ? rows : null,
+    cols,
+    rows,
   };
 }
 
@@ -816,13 +823,9 @@ function effectiveMaterial() {
 }
 
 function updateGenerateEnabled() {
-  if (shapeMode) {
-    // Generation for shaped stickers lands in a later update (see the status
-    // note set on successful analysis) — the button stays off unconditionally.
-    generateBtn.disabled = true;
-    return;
-  }
   // Order number is optional — the print filename is simply built without it.
+  // Shape mode is always single-file (never batchMode), so it falls through
+  // to the same readiness check the rectangular single-file flow uses.
   const materialOk = effectiveMaterial().length > 0 && parseInt(quantityInput.value, 10) > 0;
   const ready = batchMode
     ? batchItems.length > 0 && batchAllFit && materialOk
@@ -890,6 +893,29 @@ async function generateSingle() {
   setStatus("Готово. Файли завантажено: " + filename, "ok");
 }
 
+async function generateShapeSingle() {
+  if (!analysis || !currentLayout) return;
+  const { cols, rows } = resolveManualGrid();
+  const payload = {
+    upload_id: analysis.upload_id,
+    sheet_name: sheetSelect.value,
+    sheet_w: parseFloat(sheetWInput.value),
+    sheet_h: parseFloat(sheetHInput.value),
+    mark_offset: parseFloat(markOffsetInput.value) || 0,
+    field_margin: parseFloat(fieldMarginInput.value) || 0,
+    orientation: orientationSelect.value || null,
+    cols,
+    rows,
+    order: orderNumberInput.value.trim(),
+    material: effectiveMaterial(),
+    quantity: parseInt(quantityInput.value, 10),
+    cut_contour: cutContourCheckbox.checked,
+  };
+  const { blob, filename } = await postForZip("/api/generate-shape", payload);
+  downloadBlob(blob, filename);
+  setStatus("Готово. Файли завантажено: " + filename, "ok");
+}
+
 async function generateBatch() {
   if (!batchItems.length) return;
   const payload = {
@@ -914,7 +940,8 @@ generateBtn.addEventListener("click", async () => {
   generateBtn.disabled = true;
   setStatus("Генерація файлів…");
   try {
-    if (batchMode) await generateBatch();
+    if (shapeMode) await generateShapeSingle();
+    else if (batchMode) await generateBatch();
     else await generateSingle();
   } catch (err) {
     setStatus(String(err.message || err), "error");
