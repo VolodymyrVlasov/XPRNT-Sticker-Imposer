@@ -108,6 +108,40 @@ def _group_subpaths_pt(items: list) -> list[list[tuple]]:
     return subpaths
 
 
+def extract_raster_only_pdf(path: str, output_path: str) -> None:
+    """Write a copy of page 0 containing only its raster image(s), same page size,
+    same image placement, with all vector paths stripped — this is what gets tiled
+    into the print PDF, since the cut-contour vector lines must never be printed.
+    """
+    import fitz  # PyMuPDF
+
+    src = fitz.open(path)
+    try:
+        if src.page_count == 0:
+            raise ValueError("PDF не містить сторінок")
+        page = src[0]
+
+        images_info = [i for i in page.get_image_info(xrefs=True) if i.get("xref")]
+        if not images_info:
+            raise ValueError(
+                "У файлі не знайдено растрового шару для друку — "
+                "додайте зображення для друку як растровий об'єкт"
+            )
+
+        out = fitz.open()
+        try:
+            new_page = out.new_page(width=page.rect.width, height=page.rect.height)
+            for info in images_info:
+                xref = info["xref"]
+                img_bytes = src.extract_image(xref)["image"]
+                new_page.insert_image(fitz.Rect(info["bbox"]), stream=img_bytes)
+            out.save(output_path)
+        finally:
+            out.close()
+    finally:
+        src.close()
+
+
 def inspect_shape_pdf(path: str) -> ShapeArtworkInfo:
     """Raises ValueError with a clear Ukrainian message on any validation failure."""
     import fitz  # PyMuPDF

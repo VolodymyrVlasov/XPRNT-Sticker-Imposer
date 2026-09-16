@@ -28,6 +28,22 @@ def build_zip(
             zf.write(path, arcname=f"{template_folder_name}/{os.path.basename(path)}")
 
 
+def build_shape_zip(
+    zip_path: str,
+    print_pdf_path: str,
+    plt_path: str,
+    contour_pdf_path: str | None = None,
+) -> None:
+    """Shaped-sticker output has no template subfolder — print PDF, PLT, and the
+    optional contour PDF all sit directly at the zip root.
+    """
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(print_pdf_path, arcname=os.path.basename(print_pdf_path))
+        zf.write(plt_path, arcname=os.path.basename(plt_path))
+        if contour_pdf_path:
+            zf.write(contour_pdf_path, arcname=os.path.basename(contour_pdf_path))
+
+
 def build_batch_zip(
     zip_path: str,
     print_pdf_paths: list[str],
