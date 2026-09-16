@@ -47,7 +47,7 @@ def generate_shape(payload: ShapeGenerateRequest, background_tasks: BackgroundTa
         # Raster-only copy of the artwork — the cut-contour vector lines must
         # never print, only the print PDF's own drawn-fresh geometry may.
         raster_only_pdf = os.path.join(work_dir, "_raster_only.pdf")
-        extract_raster_only_pdf(artwork_path, raster_only_pdf)
+        extract_raster_only_pdf(artwork_path, raster_only_pdf, info.bleed_box_pt)
 
         # Descriptive base name only — unlike the rectangular flow, shaped
         # output has no template subfolder, so this never becomes a directory.
