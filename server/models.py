@@ -68,6 +68,34 @@ class BatchItem(BaseModel):
     dim_h: float = Field(gt=0)
 
 
+class ContourSegment(BaseModel):
+    kind: str  # "L" or "C"
+    points: list[float]
+
+
+class ContourSubpath(BaseModel):
+    start: tuple[float, float]
+    segments: list[ContourSegment]
+    closed: bool
+
+
+class ContourGeometry(BaseModel):
+    bleed_mm: float
+    subpaths: list[ContourSubpath]  # relative to the dim_w x dim_h tile box below
+
+
+class ShapeAnalyzeResponse(BaseModel):
+    upload_id: str
+    filename: str
+    dim_w: float  # bleed-inclusive tile size — feeds the grid math
+    dim_h: float
+    page_count: int
+    sheet_name: str
+    layout: LayoutResult
+    thumbnail: str
+    contour: ContourGeometry
+
+
 class BatchGenerateRequest(BaseModel):
     items: list[BatchItem]
     sheet_name: str
