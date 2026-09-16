@@ -2,7 +2,11 @@
 
 const el = (id) => document.getElementById(id);
 
+const tabRectBtn = el("tab-rect");
+const tabShapeBtn = el("tab-shape");
+
 const dropzone = el("dropzone");
+const dropzoneText = el("dropzone-text");
 const fileInput = el("file-input");
 const artworkInfo = el("artwork-info");
 const artworkFilename = el("artwork-filename");
@@ -57,6 +61,8 @@ let layoutRequestSeq = 0;
 let gridManual = false;   // true once the user edits cols/rows directly (vs. showing the auto-fit)
 let aspectLocked = true;  // sticker W/H lock, Photoshop-style
 let refW = 0, refH = 0;   // sticker W/H as of the last synced edit — the ratio used while locked
+
+let shapeMode = false;    // "Фігурні стікери" tab — fixed size, cut-contour preview, single file only
 
 let batchMode = false;
 let batchItems = [];      // analyze() results for every file in a multi-file upload
@@ -121,6 +127,22 @@ function setStatus(message, kind) {
   statusEl.textContent = message || "";
   statusEl.className = "status" + (kind ? " " + kind : "");
 }
+
+// ── sidebar tabs / mode switch ───────────────────────────────────────────
+
+const DROPZONE_TEXT_RECT = "Перетягніть один або кілька PDF сюди, або натисніть, щоб обрати файли";
+const DROPZONE_TEXT_SHAPE = "Перетягніть один PDF сюди, або натисніть, щоб обрати файл";
+
+async function switchMode(toShapeMode) {
+  if (toShapeMode === shapeMode) return;
+  await startNewTask(); // don't leave stale analysis/preview from the other mode on screen
+  shapeMode = toShapeMode;
+  tabRectBtn.classList.toggle("is-active", !shapeMode);
+  tabShapeBtn.classList.toggle("is-active", shapeMode);
+  dropzoneText.textContent = shapeMode ? DROPZONE_TEXT_SHAPE : DROPZONE_TEXT_RECT;
+}
+tabRectBtn.addEventListener("click", () => switchMode(false));
+tabShapeBtn.addEventListener("click", () => switchMode(true));
 
 // ── config / bootstrap ───────────────────────────────────────────────────
 
@@ -188,6 +210,14 @@ function handleFiles(files) {
     setStatus("Очікується файл PDF", "error");
     return;
   }
+  if (shapeMode) {
+    if (pdfs.length > 1) {
+      setStatus("У режимі «Фігурні стікери» підтримується лише один файл за раз", "error");
+      return;
+    }
+    handleSingleFile(pdfs[0]);
+    return;
+  }
   if (pdfs.length === 1) handleSingleFile(pdfs[0]);
   else handleBatchFiles(pdfs);
 }
@@ -196,6 +226,14 @@ async function analyzeFile(file) {
   const form = new FormData();
   form.append("file", file);
   const res = await fetch("/api/analyze", { method: "POST", body: form });
+  if (!res.ok) throw new Error((await res.json()).detail || "Помилка аналізу файлу");
+  return res.json();
+}
+
+async function analyzeShapeFile(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/analyze-shape", { method: "POST", body: form });
   if (!res.ok) throw new Error((await res.json()).detail || "Помилка аналізу файлу");
   return res.json();
 }
@@ -216,9 +254,9 @@ async function handleSingleFile(file) {
 
   setStatus("Аналіз файлу…");
   try {
-    const data = await analyzeFile(file);
+    const data = shapeMode ? await analyzeShapeFile(file) : await analyzeFile(file);
 
-    analysis = data;
+    analysis = data; // in shape mode this also carries `contour`
     currentLayout = data.layout;
     gridManual = false;
 
@@ -227,12 +265,17 @@ async function handleSingleFile(file) {
       (data.page_count > 1 ? ` (сторінок: ${data.page_count})` : "");
     artworkInfo.hidden = false;
 
-    stickerWInput.value = data.dim_w;
-    stickerHInput.value = data.dim_h;
-    refW = data.dim_w;
-    refH = data.dim_h;
-    setLockState(true);
-    sizeRow.hidden = false;
+    if (shapeMode) {
+      // Fixed size, read straight from the file — no W/H inputs, no lock/deform.
+      sizeRow.hidden = true;
+    } else {
+      stickerWInput.value = data.dim_w;
+      stickerHInput.value = data.dim_h;
+      refW = data.dim_w;
+      refH = data.dim_h;
+      setLockState(true);
+      sizeRow.hidden = false;
+    }
 
     sheetSelect.value = data.sheet_name;
     onSheetChanged();
@@ -243,7 +286,7 @@ async function handleSingleFile(file) {
     newTaskBtn.hidden = false;
 
     renderLayout(currentLayout, analysis, !aspectLocked);
-    setStatus("", "");
+    setStatus(shapeMode ? "Генерація файлів для фігурних стікерів буде додана на наступному етапі" : "", "");
   } catch (err) {
     setStatus(String(err.message || err), "error");
   }
@@ -448,8 +491,10 @@ function collectLayoutInput() {
   // actually touched them — otherwise every other field edit would "freeze"
   // the grid at its last displayed size instead of re-optimizing.
   const useManualGrid = gridManual && Number.isFinite(cols) && cols > 0 && Number.isFinite(rows) && rows > 0;
-  const dimW = parseFloat(stickerWInput.value) || analysis.dim_w;
-  const dimH = parseFloat(stickerHInput.value) || analysis.dim_h;
+  // Shape mode has no size inputs — dim_w/dim_h always come straight from the
+  // analyzed file (they already include the bleed).
+  const dimW = shapeMode ? analysis.dim_w : (parseFloat(stickerWInput.value) || analysis.dim_w);
+  const dimH = shapeMode ? analysis.dim_h : (parseFloat(stickerHInput.value) || analysis.dim_h);
   return {
     dim_w: dimW,
     dim_h: dimH,
@@ -569,6 +614,26 @@ function svgEl(tag, attrs) {
   return e;
 }
 
+// Build an SVG path "d" string from a ShapeAnalyzeResponse's contour.subpaths
+// (M start, one L/C command per segment, Z if closed). Coordinates are already
+// in mm relative to the artwork's own top-left corner — same convention as
+// this SVG's viewBox — so no extra transform is needed here.
+function contourPathD(subpaths) {
+  return subpaths.map((sp) => {
+    let d = `M ${sp.start[0]} ${sp.start[1]}`;
+    for (const seg of sp.segments) {
+      if (seg.kind === "C") {
+        const [x1, y1, x2, y2, x, y] = seg.points;
+        d += ` C ${x1} ${y1} ${x2} ${y2} ${x} ${y}`;
+      } else {
+        d += ` L ${seg.points[0]} ${seg.points[1]}`;
+      }
+    }
+    if (sp.closed) d += " Z";
+    return d;
+  }).join(" ");
+}
+
 function renderLayout(layout, artwork, deform) {
   const sheetW = layout.sheet_w;
   const sheetH = layout.sheet_h;
@@ -620,7 +685,7 @@ function renderLayout(layout, artwork, deform) {
   const strideY = layout.cell_h + layout.gap;
   const hasThumb = !!(artwork && artwork.thumbnail);
 
-  let artW = 0, artH = 0, rotate = false, fitW = 0, fitH = 0, padX = 0, padY = 0;
+  let artW = 0, artH = 0, rotate = false, fitW = 0, fitH = 0, padX = 0, padY = 0, rotCx = 0, rotCy = 0;
   if (hasThumb) {
     artW = artwork.dim_w;
     artH = artwork.dim_h;
@@ -629,8 +694,11 @@ function renderLayout(layout, artwork, deform) {
     rotate = cellIsLandscape !== artIsLandscape;
     if (rotate) { const t = artW; artW = artH; artH = t; }
 
-    if (deform) {
-      // Deformed — the artwork is stretched independently on X/Y to exactly fill the cell.
+    if (shapeMode || deform) {
+      // Shape mode: dim_w/dim_h already equal the bleed-inclusive tile, so the
+      // tile IS the cell — no contain-fit scaling/padding needed, the tile
+      // simply fills the cell (only the rotate handling below still applies).
+      // Deform: the artwork is stretched independently on X/Y to fill the cell.
       fitW = layout.cell_w;
       fitH = layout.cell_h;
     } else {
@@ -640,6 +708,10 @@ function renderLayout(layout, artwork, deform) {
       fitH = artH * scale;
       padX = (layout.cell_w - fitW) / 2;
       padY = (layout.cell_h - fitH) / 2;
+    }
+    if (rotate) {
+      rotCx = padX + fitW / 2;
+      rotCy = padY + fitH / 2;
     }
   }
 
@@ -666,13 +738,11 @@ function renderLayout(layout, artwork, deform) {
         if (rotate) {
           // Pre-rotation box is W/H swapped, centered on the same point the
           // final (post-rotation) box would occupy, then rotated 90° about that center.
-          const cx = padX + fitW / 2;
-          const cy = padY + fitH / 2;
-          image.setAttribute("x", cx - fitH / 2);
-          image.setAttribute("y", cy - fitW / 2);
+          image.setAttribute("x", rotCx - fitH / 2);
+          image.setAttribute("y", rotCy - fitW / 2);
           image.setAttribute("width", fitH);
           image.setAttribute("height", fitW);
-          image.setAttribute("transform", `rotate(90 ${cx} ${cy})`);
+          image.setAttribute("transform", `rotate(90 ${rotCx} ${rotCy})`);
         } else {
           image.setAttribute("x", padX);
           image.setAttribute("y", padY);
@@ -680,13 +750,34 @@ function renderLayout(layout, artwork, deform) {
           image.setAttribute("height", fitH);
         }
         nested.appendChild(image);
+
+        if (shapeMode && artwork.contour) {
+          // Cut-contour outline, sharing the exact same translate/rotate as the
+          // image above so it always lines up with the raster underneath it.
+          const path = svgEl("path", {
+            d: contourPathD(artwork.contour.subpaths),
+            fill: "none",
+            stroke: "#000000",
+            "stroke-width": strokeW * 0.5,
+            "stroke-dasharray": `${strokeW * 1.2},${strokeW * 0.8}`,
+          });
+          path.setAttribute("transform", rotate
+            ? `rotate(90 ${rotCx} ${rotCy}) translate(${rotCx - fitH / 2} ${rotCy - fitW / 2})`
+            : `translate(${padX} ${padY})`);
+          nested.appendChild(path);
+        }
+
         previewSvg.appendChild(nested);
       }
 
-      previewSvg.appendChild(svgEl("rect", {
-        x: cellX, y: cellY, width: layout.cell_w, height: layout.cell_h,
-        fill: "none", stroke: "#111111", "stroke-width": strokeW * 0.6,
-      }));
+      if (!shapeMode) {
+        // Shape-mode cells get the traced cut contour (added above) as their
+        // border instead of a plain rectangle.
+        previewSvg.appendChild(svgEl("rect", {
+          x: cellX, y: cellY, width: layout.cell_w, height: layout.cell_h,
+          fill: "none", stroke: "#111111", "stroke-width": strokeW * 0.6,
+        }));
+      }
     }
   }
 
@@ -725,6 +816,12 @@ function effectiveMaterial() {
 }
 
 function updateGenerateEnabled() {
+  if (shapeMode) {
+    // Generation for shaped stickers lands in a later update (see the status
+    // note set on successful analysis) — the button stays off unconditionally.
+    generateBtn.disabled = true;
+    return;
+  }
   // Order number is optional — the print filename is simply built without it.
   const materialOk = effectiveMaterial().length > 0 && parseInt(quantityInput.value, 10) > 0;
   const ready = batchMode
