@@ -6,7 +6,6 @@ const tabRectBtn = el("tab-rect");
 const tabShapeBtn = el("tab-shape");
 
 const dropzone = el("dropzone");
-const dropzoneText = el("dropzone-text");
 const fileInput = el("file-input");
 const artworkInfo = el("artwork-info");
 const artworkFilename = el("artwork-filename");
@@ -62,10 +61,10 @@ let gridManual = false;   // true once the user edits cols/rows directly (vs. sh
 let aspectLocked = true;  // sticker W/H lock, Photoshop-style
 let refW = 0, refH = 0;   // sticker W/H as of the last synced edit — the ratio used while locked
 
-let shapeMode = false;    // "Фігурні стікери" tab — fixed size, cut-contour preview, single file only
+let shapeMode = false;    // "Фігурні стікери" tab — fixed size, cut-contour preview
 
 let batchMode = false;
-let batchItems = [];      // analyze() results for every file in a multi-file upload
+let batchItems = [];      // analyze()/analyzeShapeFile() results for every file in a multi-file upload
 let batchLayouts = [];    // [{ item, layout, error }] — last renderBatchSummary() results, for drill-down
 let batchDetailIndex = null; // index into batchLayouts currently shown as a full preview, or null = list view
 let batchAllFit = false;
@@ -130,16 +129,12 @@ function setStatus(message, kind) {
 
 // ── sidebar tabs / mode switch ───────────────────────────────────────────
 
-const DROPZONE_TEXT_RECT = "Перетягніть один або кілька PDF сюди, або натисніть, щоб обрати файли";
-const DROPZONE_TEXT_SHAPE = "Перетягніть один PDF сюди, або натисніть, щоб обрати файл";
-
 async function switchMode(toShapeMode) {
   if (toShapeMode === shapeMode) return;
   await startNewTask(); // don't leave stale analysis/preview from the other mode on screen
   shapeMode = toShapeMode;
   tabRectBtn.classList.toggle("is-active", !shapeMode);
   tabShapeBtn.classList.toggle("is-active", shapeMode);
-  dropzoneText.textContent = shapeMode ? DROPZONE_TEXT_SHAPE : DROPZONE_TEXT_RECT;
 }
 tabRectBtn.addEventListener("click", () => switchMode(false));
 tabShapeBtn.addEventListener("click", () => switchMode(true));
@@ -210,14 +205,8 @@ function handleFiles(files) {
     setStatus("Очікується файл PDF", "error");
     return;
   }
-  if (shapeMode) {
-    if (pdfs.length > 1) {
-      setStatus("У режимі «Фігурні стікери» підтримується лише один файл за раз", "error");
-      return;
-    }
-    handleSingleFile(pdfs[0]);
-    return;
-  }
+  // Same single-vs-batch dispatch for both modes — shapeMode only decides
+  // which endpoints handleSingleFile()/handleBatchFiles() call internally.
   if (pdfs.length === 1) handleSingleFile(pdfs[0]);
   else handleBatchFiles(pdfs);
 }
@@ -322,7 +311,7 @@ async function handleBatchFiles(files) {
 
   await Promise.all(files.map(async (file, i) => {
     try {
-      const data = await analyzeFile(file);
+      const data = shapeMode ? await analyzeShapeFile(file) : await analyzeFile(file);
       batchItems.push(data);
       rows[i].textContent = `${data.filename} — ${fmt(data.dim_w)} × ${fmt(data.dim_h)} мм`;
     } catch (err) {
@@ -824,8 +813,9 @@ function effectiveMaterial() {
 
 function updateGenerateEnabled() {
   // Order number is optional — the print filename is simply built without it.
-  // Shape mode is always single-file (never batchMode), so it falls through
-  // to the same readiness check the rectangular single-file flow uses.
+  // shapeMode doesn't need its own branch here: batchMode/analysis/
+  // currentLayout/batchItems/batchAllFit are already populated the same way
+  // regardless of mode, so the existing single-vs-batch check covers both.
   const materialOk = effectiveMaterial().length > 0 && parseInt(quantityInput.value, 10) > 0;
   const ready = batchMode
     ? batchItems.length > 0 && batchAllFit && materialOk
@@ -936,11 +926,32 @@ async function generateBatch() {
   setStatus(`Готово. ${batchItems.length} файлів оброблено, завантажено: ${filename}`, "ok");
 }
 
+async function generateShapeBatch() {
+  if (!batchItems.length) return;
+  const payload = {
+    items: batchItems.map((it) => ({ upload_id: it.upload_id })),
+    sheet_name: sheetSelect.value,
+    sheet_w: parseFloat(sheetWInput.value),
+    sheet_h: parseFloat(sheetHInput.value),
+    mark_offset: parseFloat(markOffsetInput.value) || 0,
+    field_margin: parseFloat(fieldMarginInput.value) || 0,
+    orientation: orientationSelect.value || null,
+    order: orderNumberInput.value.trim(),
+    material: effectiveMaterial(),
+    quantity: parseInt(quantityInput.value, 10),
+    cut_contour: cutContourCheckbox.checked,
+  };
+  const { blob, filename } = await postForZip("/api/generate-batch-shape", payload);
+  downloadBlob(blob, filename);
+  setStatus(`Готово. ${batchItems.length} файлів оброблено, завантажено: ${filename}`, "ok");
+}
+
 generateBtn.addEventListener("click", async () => {
   generateBtn.disabled = true;
   setStatus("Генерація файлів…");
   try {
-    if (shapeMode) await generateShapeSingle();
+    if (shapeMode && batchMode) await generateShapeBatch();
+    else if (shapeMode) await generateShapeSingle();
     else if (batchMode) await generateBatch();
     else await generateSingle();
   } catch (err) {
