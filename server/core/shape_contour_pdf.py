@@ -1,10 +1,12 @@
 """Vector contour-only PDF for shaped stickers, for re-creating a cut file in
 third-party cutting/plotting software from an already-produced layout.
 
-Includes the same corner registration marks as the rectangular flow's template
-PDF (shared via server/core/marks.py) plus the actual extracted cut contour —
-real stroked bezier curves, not flattened — tiled across every grid cell, in
-the same magenta cut-line convention server/core/cut_contour_pdf.py uses.
+Just the traced cut-contour geometry — real stroked bezier curves, not
+flattened — tiled across every grid cell, in the same magenta cut-line
+convention server/core/cut_contour_pdf.py uses. No registration marks here:
+those belong on the actual printed sheet (server/core/shape_print_pdf.py),
+which is what a human or the plotter's own sensors align the physical cut
+against.
 
 Rotation: when a cell's orientation doesn't match the artwork's natural
 orientation, the contour is translated to center on the cell (offset
@@ -19,9 +21,8 @@ from reportlab.lib.colors import CMYKColor
 from reportlab.pdfgen import canvas
 
 from server.core.layout import Grid
-from server.core.marks import draw_registration_marks
 from server.core.shape_inspect import ContourSubpath
-from server.utils.constants import K100, MM
+from server.utils.constants import MM
 
 CUT_COLOR = CMYKColor(0, 1, 0, 0)  # 100% magenta — same convention as cut_contour_pdf.py
 LINE_WIDTH_MM = 0.1
@@ -57,10 +58,6 @@ def generate_shape_contour_pdf(
 
     def pt(v: float) -> float:
         return v * MM
-
-    c.setFillColor(K100)
-    c.setStrokeColor(K100)
-    draw_registration_marks(c, grid)
 
     c.setStrokeColor(CUT_COLOR)
     c.setLineWidth(LINE_WIDTH_MM * MM)
