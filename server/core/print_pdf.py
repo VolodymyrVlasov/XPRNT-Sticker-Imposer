@@ -1,3 +1,6 @@
+import os
+import tempfile
+
 from server.core.layout import Grid
 from server.utils.constants import MM
 
@@ -8,6 +11,7 @@ def generate_print_pdf(
     artwork_path: str,
     grid: Grid,
     deform: bool = False,
+    outline: bool = False,
 ) -> None:
     from pypdf import PageObject, PdfReader, PdfWriter, Transformation
 
@@ -54,7 +58,7 @@ def generate_print_pdf(
     # Layer 1 — template registration marks (bottom)
     page.merge_page(PdfReader(template_pdf_path).pages[0], over=True)
 
-    # Layer 2 — artwork tiled into every cell (top)
+    # Layer 2 — artwork tiled into every cell (middle)
     stride_x = grid.cell_w + grid.gap
     stride_y = grid.cell_h + grid.gap
     for row in range(grid.rows):
@@ -67,7 +71,39 @@ def generate_print_pdf(
             t = Transformation((scale_x, 0, 0, scale_y, tx, ty))
             page.merge_transformed_page(art_page, t, over=True)
 
-    writer = PdfWriter()
-    writer.add_page(page)
-    with open(output_path, "wb") as f:
-        writer.write(f)
+    # Layer 3 — optional 0.1mm black outline around every cell (top layer —
+    # see draw_cell_outlines' own docstring for why it must go here, not
+    # baked into the template above).
+    outline_path = None
+    outline_reader = None
+    try:
+        if outline:
+            from reportlab.pdfgen import canvas as rl_canvas
+
+            from server.core.marks import draw_cell_outlines
+            from server.utils.constants import K100
+
+            outline_fd, outline_path = tempfile.mkstemp(
+                suffix=".pdf", dir=os.path.dirname(output_path) or ".",
+            )
+            os.close(outline_fd)
+            oc = rl_canvas.Canvas(outline_path, pagesize=(sheet_w_pt, sheet_h_pt))
+            oc.setStrokeColor(K100)
+            draw_cell_outlines(oc, grid)
+            oc.save()
+            outline_reader = PdfReader(outline_path)
+            page.merge_page(outline_reader.pages[0], over=True)
+
+        writer = PdfWriter()
+        writer.add_page(page)
+        with open(output_path, "wb") as f:
+            writer.write(f)
+    finally:
+        # Same Windows lazy-merge gotcha shape_print_pdf.py already documents
+        # for its own marks temp file: pypdf only actually reads
+        # outline_reader's page content at writer.write() above, so the
+        # reader (and its file handle) must stay open until after that call.
+        if outline_reader is not None:
+            outline_reader.close()
+        if outline_path is not None:
+            os.remove(outline_path)

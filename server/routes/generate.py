@@ -67,7 +67,7 @@ def generate(payload: GenerateRequest, background_tasks: BackgroundTasks) -> Fil
             artwork_filename=artwork_filename,
         )
         print_path = get_unique_path(work_dir, print_filename)
-        generate_print_pdf(print_path, tpl_pdf, artwork_path, grid, deform=payload.deform)
+        generate_print_pdf(print_path, tpl_pdf, artwork_path, grid, deform=payload.deform, outline=payload.outline)
 
         zip_path = os.path.join(work_dir, "output.zip")
         build_zip(zip_path, print_path, folder_name, template_files)

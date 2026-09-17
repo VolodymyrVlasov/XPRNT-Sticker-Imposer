@@ -81,7 +81,7 @@ def generate_batch(payload: BatchGenerateRequest, background_tasks: BackgroundTa
                 artwork_filename=artwork_filename,
             )
             print_path = get_unique_path(work_dir, print_filename)
-            generate_print_pdf(print_path, tpl_pdf, artwork_path, grid, deform=item.deform)
+            generate_print_pdf(print_path, tpl_pdf, artwork_path, grid, deform=item.deform, outline=payload.outline)
             print_paths.append(print_path)
 
         zip_path = os.path.join(work_dir, "output.zip")

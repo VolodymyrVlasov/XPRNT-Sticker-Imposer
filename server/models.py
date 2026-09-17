@@ -62,6 +62,8 @@ class GenerateRequest(BaseModel):
     # Also emit a vector PDF of the cut geometry, for recreating a cut file in
     # third-party cutting software from this layout.
     cut_contour: bool = False
+    # Draw a 0.1mm solid black outline frame around every sticker cell.
+    outline: bool = False
 
 
 class BatchItem(BaseModel):
@@ -119,6 +121,8 @@ class ShapeGenerateRequest(BaseModel):
     material: str
     quantity: int = Field(gt=0)
     cut_contour: bool = False
+    # Draw a 0.1mm solid black outline frame around every sticker cell.
+    outline: bool = False
     bleed_mm: float = Field(default=SHAPE_BLEED_MM, ge=0)
     # No dim_w/dim_h/gap/deform — the server re-derives the authoritative size
     # and contour by re-running inspect_shape_pdf on the stored upload, and
@@ -143,6 +147,8 @@ class ShapeBatchGenerateRequest(BaseModel):
     order: str
     material: str
     cut_contour: bool = False
+    # Draw a 0.1mm solid black outline frame around every sticker cell.
+    outline: bool = False
     bleed_mm: float = Field(default=SHAPE_BLEED_MM, ge=0)
     # No per-item dim_w/dim_h — re-derived server-side per item, same as
     # ShapeGenerateRequest. bleed_mm is shared across every item in the batch,
@@ -161,3 +167,5 @@ class BatchGenerateRequest(BaseModel):
     order: str
     material: str
     cut_contour: bool = False
+    # Draw a 0.1mm solid black outline frame around every sticker cell.
+    outline: bool = False

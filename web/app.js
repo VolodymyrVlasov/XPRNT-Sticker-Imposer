@@ -34,6 +34,7 @@ const paramsPendingHint = el("params-pending-hint");
 const paramsApplyBtn = el("params-apply-btn");
 
 const cutContourCheckbox = el("cut-contour-checkbox");
+const outlineCheckbox = el("outline-checkbox");
 
 const generateBtn = el("generate-btn");
 const newTaskBtn = el("new-task-btn");
@@ -374,6 +375,7 @@ async function startNewTask() {
   paramsPendingHint.hidden = true;
 
   cutContourCheckbox.checked = true;
+  outlineCheckbox.checked = false;
 
   orderNumberInput.value = "";
   materialSelect.selectedIndex = 0;
@@ -431,6 +433,16 @@ async function applyTab2Params() {
   updateGenerateEnabled();
 }
 paramsApplyBtn.addEventListener("click", applyTab2Params);
+
+// Pure visual toggle, no layout math involved — redraw just the current
+// preview instead of a full renderSelectedPreview(), which would also reset
+// the user's zoom/pan.
+outlineCheckbox.addEventListener("change", () => {
+  if (selectedIndex >= 0 && items[selectedIndex].layout) {
+    const it = items[selectedIndex];
+    renderLayout(it.layout, it, shapeMode ? false : it.deform);
+  }
+});
 
 [orderNumberInput, materialCustomInput].forEach((input) =>
   input.addEventListener("input", updateGenerateEnabled)
@@ -764,6 +776,17 @@ function renderLayout(layout, artwork, deform) {
           fill: "none", stroke: "#111111", "stroke-width": strokeW * 0.6,
         }));
       }
+
+      if (outlineCheckbox.checked) {
+        // Visual stand-in for the real printed 0.1mm outline (see
+        // server/core/marks.py's draw_cell_outlines) — scaled up here for
+        // visibility in the SVG preview, same convention the shape-mode
+        // contour dashes already use (strokeW * 0.5), not literal mm.
+        previewSvg.appendChild(svgEl("rect", {
+          x: cellX, y: cellY, width: layout.cell_w, height: layout.cell_h,
+          fill: "none", stroke: "#000000", "stroke-width": strokeW * 0.4,
+        }));
+      }
     }
   }
 
@@ -927,6 +950,7 @@ async function generateBatch() {
     order: orderNumberInput.value.trim(),
     material: effectiveMaterial(),
     cut_contour: cutContourCheckbox.checked,
+    outline: outlineCheckbox.checked,
   };
   const { blob, filename } = await postForZip("/api/generate-batch", payload);
   downloadBlob(blob, filename);
@@ -946,6 +970,7 @@ async function generateShapeBatch() {
     order: orderNumberInput.value.trim(),
     material: effectiveMaterial(),
     cut_contour: cutContourCheckbox.checked,
+    outline: outlineCheckbox.checked,
     bleed_mm: appliedParams.bleedMm,
   };
   const { blob, filename } = await postForZip("/api/generate-batch-shape", payload);

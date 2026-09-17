@@ -75,7 +75,7 @@ def generate_shape(payload: ShapeGenerateRequest, background_tasks: BackgroundTa
             artwork_filename=artwork_filename,
         )
         print_path = get_unique_path(work_dir, print_filename)
-        generate_shape_print_pdf(print_path, raster_only_pdf, grid)
+        generate_shape_print_pdf(print_path, raster_only_pdf, grid, outline=payload.outline)
 
         zip_path = os.path.join(work_dir, "output.zip")
         build_shape_zip(zip_path, print_path, plt_file, contour_pdf)

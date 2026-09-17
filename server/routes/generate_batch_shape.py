@@ -91,7 +91,7 @@ def generate_batch_shape(payload: ShapeBatchGenerateRequest, background_tasks: B
                 artwork_filename=artwork_filename,
             )
             print_path = get_unique_path(work_dir, print_filename)
-            generate_shape_print_pdf(print_path, raster_only_pdf, grid)
+            generate_shape_print_pdf(print_path, raster_only_pdf, grid, outline=payload.outline)
 
             zip_items.append({"print_pdf": print_path, "plt": plt_path, "contour_pdf": contour_path})
 

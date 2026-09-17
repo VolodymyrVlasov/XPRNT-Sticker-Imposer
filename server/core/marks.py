@@ -1,7 +1,9 @@
 """Corner registration marks and the feed-direction arrow, shared by the
 template PDF, the shaped-sticker print PDF, and the vector cut-contour
 reference PDF — everywhere a person or a plotter aligns against the physical
-printed sheet.
+printed sheet. Also the optional per-cell outline frame (see
+draw_cell_outlines), drawn by the print-PDF generators only, never by the
+template/contour files.
 """
 
 from server.core.layout import Grid
@@ -9,13 +11,17 @@ from server.utils.constants import MM
 
 # Feed-direction arrow: a solid triangle pointing toward the top sheet edge,
 # centered horizontally, telling the operator which way to load the sheet
-# into the plotter. Sized to sit in roughly the same vertical band as the
-# top corner marks' own 9mm arms (see draw_registration_marks) — not
-# fine-tuned pixel-for-pixel against the reference photo yet. Check the
-# smoke-test renders and adjust these two constants if the size/position
-# looks off before calling this done.
-FEED_ARROW_WIDTH_MM = 8.0
-FEED_ARROW_HEIGHT_MM = 7.0
+# into the plotter. Fixed size and edge offset per spec: 3x3mm, apex 5mm
+# from the sheet's top edge — independent of mark_offset (previously 8x7mm,
+# positioned at mark_offset + 2mm).
+FEED_ARROW_WIDTH_MM = 3.0
+FEED_ARROW_HEIGHT_MM = 3.0
+FEED_ARROW_OFFSET_MM = 5.0  # sheet top edge -> arrow apex, fixed
+
+# Optional black frame around every sticker cell ("Додати обводку довкола
+# макету" in the UI) — a printed border the customer can opt into, distinct
+# from the corner registration marks above. See draw_cell_outlines below.
+OUTLINE_STROKE_WIDTH_MM = 0.1
 
 
 def draw_registration_marks(c, grid: Grid) -> None:
@@ -40,23 +46,28 @@ def draw_registration_marks(c, grid: Grid) -> None:
     fr(sheet_w - mo - 9,    sheet_h - mo - 0.5,  9, 1)
     fr(sheet_w - mo - 0.5,  sheet_h - mo - 9,    1, 9)
 
-    _draw_feed_arrow(c, sheet_w, sheet_h, mo)
+    _draw_feed_arrow(c, sheet_w, sheet_h)
 
 
-def _draw_feed_arrow(c, sheet_w: float, sheet_h: float, mark_offset: float) -> None:
+def _draw_feed_arrow(c, sheet_w: float, sheet_h: float) -> None:
     """Solid triangle, apex toward the top sheet edge, centered horizontally
     across the sheet width — indicates which edge to feed into the plotter
-    first. Roughly spans the same vertical band as the top corner marks.
+    first. Fixed 3x3mm, apex FEED_ARROW_OFFSET_MM (5mm) from the sheet's top
+    edge.
+
+    NOTE: at the default SRA3 mark_offset=9mm/field_margin=2mm this sits
+    close to pdf_template.py's centered filename-caption band (that file
+    draws its caption + two small triangles independently, centered the same
+    way). A previous stage had to tune the old mark_offset-relative position
+    to dodge exactly this collision. This new fixed position was NOT
+    re-verified against that caption — do that in the smoke test below
+    before considering this done.
     """
     def pt(v: float) -> float:
         return v * MM
 
     cx = sheet_w / 2.0
-    apex_y = mark_offset + 2.0  # distance from the top sheet edge, mm — pushed
-    # down from the corner marks' own -0.5 baseline so the arrow's apex clears
-    # the template's centered filename-label caption (also horizontally
-    # centered, drawn independently by pdf_template.py), which occupies
-    # roughly the same band as the corner marks' top edge.
+    apex_y = FEED_ARROW_OFFSET_MM
     base_y = apex_y + FEED_ARROW_HEIGHT_MM
     half_w = FEED_ARROW_WIDTH_MM / 2.0
 
@@ -66,3 +77,34 @@ def _draw_feed_arrow(c, sheet_w: float, sheet_h: float, mark_offset: float) -> N
     p.lineTo(pt(cx + half_w),  pt(sheet_h - base_y))
     p.close()
     c.drawPath(p, fill=1, stroke=0)
+
+
+def draw_cell_outlines(c, grid: Grid) -> None:
+    """Unfilled OUTLINE_STROKE_WIDTH_MM-stroke rectangle around every cell in
+    the grid — the optional "обводка довкола макету" frame. Caller must set
+    the stroke color first (e.g. c.setStrokeColor(K100)), same convention as
+    draw_registration_marks.
+
+    The caller MUST draw this as the TOPMOST layer, over the already-tiled
+    artwork — see server/core/print_pdf.py / server/core/shape_print_pdf.py.
+    With gap=0 (batch mode) or contain-fit padding, half the stroke's width
+    sits exactly on each cell's shared edge; drawing this underneath the
+    artwork would silently hide that half wherever the (opaque) artwork tile
+    covers it, and the outline would then only ever show at the outer
+    perimeter of the whole grid instead of around every individual sticker.
+    """
+    def pt(v: float) -> float:
+        return v * MM
+
+    c.setLineWidth(pt(OUTLINE_STROKE_WIDTH_MM))
+    stride_x = grid.cell_w + grid.gap
+    stride_y = grid.cell_h + grid.gap
+    for row in range(grid.rows):
+        for col in range(grid.cols):
+            cell_x = grid.grid_x + col * stride_x
+            cell_top = grid.grid_y + row * stride_y
+            c.rect(
+                pt(cell_x), pt(grid.sheet_h - cell_top - grid.cell_h),
+                pt(grid.cell_w), pt(grid.cell_h),
+                fill=0, stroke=1,
+            )
