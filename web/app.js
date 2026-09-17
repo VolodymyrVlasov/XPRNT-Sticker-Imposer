@@ -100,6 +100,20 @@ function fmt(v) {
   return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+// A response's `detail` isn't always a plain string — FastAPI's 422
+// validation errors send an array of {type, loc, msg, input} objects, and
+// `new Error(arrayOfObjects)` stringifies that via Array.prototype.toString
+// (each element's own .toString(), which for a plain object is the useless
+// "[object Object]"). Format it into something readable before throwing.
+function formatErrorDetail(detail) {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((e) => (e && typeof e === "object" && "msg" in e) ? e.msg : JSON.stringify(e)).join("; ");
+  }
+  if (detail && typeof detail === "object") return JSON.stringify(detail);
+  return "Помилка";
+}
+
 // ── card enable/disable (plain divs, not <fieldset>, so we drive it by hand) ─
 
 function setSectionEnabled(section, enabled) {
@@ -167,6 +181,11 @@ async function loadConfig() {
 
   markOffsetInput.value = config.defaults.mark_offset;
   fieldMarginInput.value = config.defaults.field_margin;
+  onSheetChanged(); // populate sheet-w/sheet-h from the default preset immediately,
+  // not just after the sheet <select>'s own change event — otherwise Tab 2's
+  // sheet size stays blank (and appliedParams.sheetW/sheetH stay 0) until the
+  // user manually touches the dropdown, silently breaking every /api/layout
+  // call for the first file(s) added.
 }
 
 // ── file upload / analyze ────────────────────────────────────────────────
@@ -213,7 +232,10 @@ async function analyzeFile(file) {
   const form = new FormData();
   form.append("file", file);
   const res = await fetch("/api/analyze", { method: "POST", body: form });
-  if (!res.ok) throw new Error((await res.json()).detail || "Помилка аналізу файлу");
+  if (!res.ok) {
+    const detail = (await res.json()).detail;
+    throw new Error(detail != null ? formatErrorDetail(detail) : "Помилка аналізу файлу");
+  }
   return res.json();
 }
 
@@ -221,7 +243,10 @@ async function analyzeShapeFile(file) {
   const form = new FormData();
   form.append("file", file);
   const res = await fetch("/api/analyze-shape", { method: "POST", body: form });
-  if (!res.ok) throw new Error((await res.json()).detail || "Помилка аналізу файлу");
+  if (!res.ok) {
+    const detail = (await res.json()).detail;
+    throw new Error(detail != null ? formatErrorDetail(detail) : "Помилка аналізу файлу");
+  }
   return res.json();
 }
 
@@ -437,7 +462,10 @@ async function fetchLayoutFor(it) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || "Помилка розрахунку розкладки");
+    if (!res.ok) {
+      const detail = (await res.json()).detail;
+      throw new Error(detail != null ? formatErrorDetail(detail) : "Помилка розрахунку розкладки");
+    }
     return { layout: await res.json(), error: null };
   } catch (err) {
     return { layout: null, error: String(err.message || err) };
@@ -866,9 +894,12 @@ async function postForZip(url, payload) {
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    let detail = "Помилка генерації";
-    try { detail = (await res.json()).detail || detail; } catch (_) { /* ignore */ }
-    throw new Error(detail);
+    let message = "Помилка генерації";
+    try {
+      const detail = (await res.json()).detail;
+      if (detail != null) message = formatErrorDetail(detail);
+    } catch (_) { /* ignore */ }
+    throw new Error(message);
   }
   const blob = await res.blob();
   const disposition = res.headers.get("Content-Disposition") || "";
