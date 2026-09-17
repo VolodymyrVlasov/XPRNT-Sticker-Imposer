@@ -35,8 +35,12 @@
       <section class="col col-form">
         <div class="card steps-card">
 
-          <div class="card-section" id="artwork-section">
-            <div class="card-title">1. Артворк (PDF)</div>
+          <div class="card-tabs">
+            <button type="button" class="card-tab is-active" id="card-tab-files">1. Файли</button>
+            <button type="button" class="card-tab" id="card-tab-params">2. Аркуш і розмітка</button>
+          </div>
+
+          <div class="card-tab-panel" id="card-panel-files">
             <label class="dropzone" id="dropzone" for="file-input">
               <svg class="dropzone-icon" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M7 18a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 17.2 8.02 4.5 4.5 0 0 1 17 17H7z"/>
@@ -46,29 +50,17 @@
               <span id="dropzone-text">Перетягніть один або кілька PDF сюди, або натисніть, щоб обрати файли</span>
             </label>
             <input type="file" id="file-input" accept="application/pdf" multiple hidden>
-            <div class="info-row" id="artwork-info" hidden>
-              <div><span class="label">Файл</span><span id="artwork-filename">—</span></div>
-              <div><span class="label">Розмір з документа</span><span id="artwork-size">—</span></div>
+
+            <div class="file-list" id="file-list"></div>
+            <div class="file-list-empty" id="file-list-empty">Файли ще не завантажено</div>
+
+            <div class="field-row" id="cut-contour-row">
+              <label for="cut-contour-checkbox">Векторний PDF контуру різу (для сторонніх програм)</label>
+              <input type="checkbox" id="cut-contour-checkbox" checked>
             </div>
-            <div class="field-row" id="size-row" hidden>
-              <label>Розмір наклейки, мм</label>
-              <div class="pair size-pair">
-                <input type="number" id="sticker-w" min="0.1" step="0.1">
-                <button type="button" id="lock-toggle" class="lock-btn is-locked" title="Зберігати пропорції" aria-pressed="true" aria-label="Зберігати пропорції">
-                  <svg id="lock-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <rect x="5" y="11" width="14" height="9" rx="2"/>
-                    <path id="lock-shackle" d="M8 11V7a4 4 0 0 1 8 0v4"/>
-                  </svg>
-                </button>
-                <input type="number" id="sticker-h" min="0.1" step="0.1">
-              </div>
-            </div>
-            <div class="batch-list" id="batch-list" hidden></div>
           </div>
 
-          <div class="card-section is-disabled" id="params-card">
-            <div class="card-title">2. Аркуш і розмітка</div>
-
+          <div class="card-tab-panel" id="card-panel-params" hidden>
             <div class="field-row">
               <label for="sheet-select">Аркуш</label>
               <select id="sheet-select"></select>
@@ -81,7 +73,6 @@
                 <input type="number" id="sheet-h" min="1" step="0.1">
               </div>
             </div>
-
             <div class="field-row">
               <label for="mark-offset">Відступ мітки від краю аркуша, мм</label>
               <input type="number" id="mark-offset" min="0" step="0.1">
@@ -90,33 +81,11 @@
               <label for="field-margin">Відступ поля розкладки від мітки, мм</label>
               <input type="number" id="field-margin" min="0" step="0.1">
             </div>
-
-            <div class="field-row">
-              <label for="orientation-select">Орієнтація</label>
-              <select id="orientation-select">
-                <option value="">Авто</option>
-                <option value="WIDE">WIDE</option>
-                <option value="TALL">TALL</option>
-              </select>
+            <div class="field-row" id="bleed-row" hidden>
+              <label for="bleed-mm">Блід, мм</label>
+              <input type="number" id="bleed-mm" min="0" step="1" value="1">
             </div>
 
-            <div class="field-row">
-              <label>Сітка (стовпці × рядки)</label>
-              <div class="pair">
-                <input type="number" id="cols" min="0" step="1" placeholder="авто">
-                <span>×</span>
-                <input type="number" id="rows" min="0" step="1" placeholder="авто">
-              </div>
-            </div>
-
-            <div class="field-row">
-              <label for="cut-contour-checkbox">Векторний PDF контуру різу (для сторонніх програм)</label>
-              <input type="checkbox" id="cut-contour-checkbox">
-            </div>
-          </div>
-
-          <div class="card-section is-disabled" id="order-card">
-            <div class="card-title">3. Замовлення</div>
             <div class="field-row">
               <label for="order-number">Номер замовлення</label>
               <input type="text" id="order-number">
@@ -129,9 +98,10 @@
               <label for="material-custom">Назва матеріалу</label>
               <input type="text" id="material-custom" placeholder="Свій варіант…">
             </div>
-            <div class="field-row">
-              <label for="quantity">Кількість наклейок</label>
-              <input type="number" id="quantity" min="1" step="1" value="1">
+
+            <div class="params-apply-row">
+              <span class="params-pending-hint" id="params-pending-hint" hidden>Є незастосовані зміни</span>
+              <button type="button" class="primary-btn" id="params-apply-btn">Застосувати</button>
             </div>
           </div>
 
@@ -141,19 +111,18 @@
       <section class="col col-preview">
         <div class="card preview-card">
           <div class="card-title" id="preview-title">Прев'ю розкладки</div>
-          <div id="single-preview-block">
-            <button type="button" id="batch-back-btn" class="ghost-btn back-btn" hidden>← До списку файлів</button>
-            <div class="preview-head">
-              <span id="preview-fit" class="pill"></span>
+          <div class="preview-head">
+            <div class="preview-zoom-controls">
+              <button type="button" id="zoom-out" title="Зменшити">−</button>
+              <button type="button" id="zoom-reset" title="Скинути масштаб">⤢</button>
+              <button type="button" id="zoom-in" title="Збільшити">+</button>
             </div>
-            <div class="preview-canvas">
-              <svg id="preview-svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"></svg>
-            </div>
-            <dl class="preview-stats" id="preview-stats"></dl>
           </div>
-          <div id="batch-preview-block" hidden>
-            <div class="batch-summary" id="batch-summary"></div>
+          <div class="preview-canvas" id="preview-canvas" hidden>
+            <svg id="preview-svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"></svg>
           </div>
+          <div class="preview-stats-compact" id="preview-stats" hidden></div>
+          <div class="preview-empty" id="preview-empty">Оберіть файл зі списку</div>
         </div>
       </section>
     </div>
@@ -166,6 +135,55 @@
       </div>
     </div>
   </main>
+</div>
+
+<div class="modal-overlay" id="props-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="props-modal-title">
+    <div class="modal-title" id="props-modal-title">Властивості файлу</div>
+    <div class="modal-filename" id="props-modal-filename"></div>
+
+    <div class="field-row" id="props-size-row">
+      <label>Розмір наклейки, мм</label>
+      <div class="pair size-pair">
+        <input type="number" id="props-w" min="0.1" step="0.1">
+        <button type="button" id="props-lock-toggle" class="lock-btn is-locked" title="Зберігати пропорції" aria-pressed="true" aria-label="Зберігати пропорції">
+          <svg id="props-lock-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="5" y="11" width="14" height="9" rx="2"/>
+            <path id="props-lock-shackle" d="M8 11V7a4 4 0 0 1 8 0v4"/>
+          </svg>
+        </button>
+        <input type="number" id="props-h" min="0.1" step="0.1">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <label for="props-orientation">Орієнтація</label>
+      <select id="props-orientation">
+        <option value="">Авто</option>
+        <option value="WIDE">WIDE</option>
+        <option value="TALL">TALL</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <label>Сітка (стовпці × рядки)</label>
+      <div class="pair">
+        <input type="number" id="props-cols" min="0" step="1" placeholder="авто">
+        <span>×</span>
+        <input type="number" id="props-rows" min="0" step="1" placeholder="авто">
+      </div>
+    </div>
+    <div class="field-row">
+      <label for="props-quantity">Кількість наклейок</label>
+      <input type="number" id="props-quantity" min="1" step="1">
+    </div>
+
+    <div class="modal-error" id="props-modal-error" hidden></div>
+
+    <div class="modal-actions">
+      <button type="button" class="ghost-btn" id="props-cancel">Скасувати</button>
+      <button type="button" class="primary-btn" id="props-apply">Застосувати</button>
+    </div>
+  </div>
 </div>
 
 <script src="app.js"></script>

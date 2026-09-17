@@ -7,18 +7,14 @@ const tabShapeBtn = el("tab-shape");
 
 const dropzone = el("dropzone");
 const fileInput = el("file-input");
-const artworkInfo = el("artwork-info");
-const artworkFilename = el("artwork-filename");
-const artworkSize = el("artwork-size");
 
-const sizeRow = el("size-row");
-const stickerWInput = el("sticker-w");
-const stickerHInput = el("sticker-h");
-const lockToggleBtn = el("lock-toggle");
-const lockShacklePath = el("lock-shackle");
+const cardTabFilesBtn = el("card-tab-files");
+const cardTabParamsBtn = el("card-tab-params");
+const cardPanelFiles = el("card-panel-files");
+const cardPanelParams = el("card-panel-params");
 
-const paramsCard = el("params-card");
-const orderCard = el("order-card");
+const fileListEl = el("file-list");
+const fileListEmptyEl = el("file-list-empty");
 
 const sheetSelect = el("sheet-select");
 const customSheetRow = el("custom-sheet-row");
@@ -26,15 +22,16 @@ const sheetWInput = el("sheet-w");
 const sheetHInput = el("sheet-h");
 const markOffsetInput = el("mark-offset");
 const fieldMarginInput = el("field-margin");
-const orientationSelect = el("orientation-select");
-const colsInput = el("cols");
-const rowsInput = el("rows");
+const bleedRow = el("bleed-row");
+const bleedMmInput = el("bleed-mm");
 
 const orderNumberInput = el("order-number");
 const materialSelect = el("material-select");
 const materialCustomRow = el("material-custom-row");
 const materialCustomInput = el("material-custom");
-const quantityInput = el("quantity");
+
+const paramsPendingHint = el("params-pending-hint");
+const paramsApplyBtn = el("params-apply-btn");
 
 const cutContourCheckbox = el("cut-contour-checkbox");
 
@@ -43,32 +40,55 @@ const newTaskBtn = el("new-task-btn");
 const statusEl = el("status");
 
 const previewTitle = el("preview-title");
-const singlePreviewBlock = el("single-preview-block");
-const batchBackBtn = el("batch-back-btn");
+const previewCanvas = el("preview-canvas");
 const previewSvg = el("preview-svg");
-const previewFit = el("preview-fit");
 const previewStats = el("preview-stats");
+const previewEmpty = el("preview-empty");
+const zoomInBtn = el("zoom-in");
+const zoomOutBtn = el("zoom-out");
+const zoomResetBtn = el("zoom-reset");
 
-const batchListEl = el("batch-list");
-const batchPreviewBlock = el("batch-preview-block");
-const batchSummaryEl = el("batch-summary");
+const propsModal = el("props-modal");
+const propsModalFilename = el("props-modal-filename");
+const propsSizeRow = el("props-size-row");
+const propsWInput = el("props-w");
+const propsHInput = el("props-h");
+const propsLockToggleBtn = el("props-lock-toggle");
+const propsLockShacklePath = el("props-lock-shackle");
+const propsOrientation = el("props-orientation");
+const propsCols = el("props-cols");
+const propsRows = el("props-rows");
+const propsQuantity = el("props-quantity");
+const propsModalError = el("props-modal-error");
+const propsCancelBtn = el("props-cancel");
+const propsApplyBtn = el("props-apply");
 
 let config = null;
-let analysis = null;      // { upload_id, filename, dim_w, dim_h, page_count, thumbnail }
-let currentLayout = null; // last LayoutResult from /api/analyze or /api/layout
+let shapeMode = false; // "Фігурні стікери" sidebar tab — fixed size, cut-contour preview
+
+// items: always populated — one entry even for a single file.
+// {
+//   upload_id, filename, dim_w, dim_h, page_count, thumbnail,
+//   contour,                          // shape mode only
+//   actualW, actualH,                 // shape mode only — derived client-side
+//   orientation, cols, rows,          // null = auto, set via the properties popup
+//   quantity,                         // default 1
+//   editDimW, editDimH,               // rectangular only — null = use dim_w/dim_h as analyzed
+//   deform,                           // rectangular only — default false
+//   layout, layoutError,              // last /api/layout result for this item, or an error string
+// }
+let items = [];
+let selectedIndex = -1; // index into items currently shown in the preview card, or -1
 let layoutRequestSeq = 0;
-let gridManual = false;   // true once the user edits cols/rows directly (vs. showing the auto-fit)
-let aspectLocked = true;  // sticker W/H lock, Photoshop-style
-let refW = 0, refH = 0;   // sticker W/H as of the last synced edit — the ratio used while locked
 
-let shapeMode = false;    // "Фігурні стікери" tab — fixed size, cut-contour preview
-
-let batchMode = false;
-let batchItems = [];      // analyze()/analyzeShapeFile() results for every file in a multi-file upload
-let batchLayouts = [];    // [{ item, layout, error }] — last renderBatchSummary() results, for drill-down
-let batchDetailIndex = null; // index into batchLayouts currently shown as a full preview, or null = list view
-let batchAllFit = false;
-let batchRequestSeq = 0;
+// Applied (post-"Застосувати") batch-level params — distinct from what's
+// currently typed into Tab 2's inputs. Drives /api/layout calls until the
+// user clicks Apply again.
+let appliedParams = {
+  sheetName: "SRA3", sheetW: 0, sheetH: 0,
+  markOffset: 0, fieldMargin: 0,
+  bleedMm: 1.0, // shape mode only, default matches SHAPE_BLEED_MM
+};
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -76,49 +96,16 @@ function escapeHtml(s) {
 
 function round2(v) { return Math.round(v * 100) / 100; }
 
+function fmt(v) {
+  return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
 // ── card enable/disable (plain divs, not <fieldset>, so we drive it by hand) ─
 
 function setSectionEnabled(section, enabled) {
   section.classList.toggle("is-disabled", !enabled);
   section.querySelectorAll("input, select, button").forEach((field) => { field.disabled = !enabled; });
 }
-
-// ── sticker size (editable) + aspect-ratio lock ─────────────────────────────
-
-function setLockState(locked) {
-  aspectLocked = locked;
-  lockToggleBtn.classList.toggle("is-locked", locked);
-  lockToggleBtn.setAttribute("aria-pressed", String(locked));
-  lockToggleBtn.title = locked ? "Зберігати пропорції" : "Вільна зміна (деформація артворку)";
-  lockShacklePath.setAttribute("d", locked ? "M8 11V7a4 4 0 0 1 8 0v4" : "M8 11V7a4 4 0 0 1 7.5-3.8");
-  if (locked) {
-    // Re-anchor the ratio to whatever is on screen right now.
-    refW = parseFloat(stickerWInput.value) || refW;
-    refH = parseFloat(stickerHInput.value) || refH;
-  }
-}
-lockToggleBtn.addEventListener("click", () => setLockState(!aspectLocked));
-
-function onStickerWInput() {
-  const w = parseFloat(stickerWInput.value);
-  if (Number.isFinite(w) && w > 0) {
-    if (aspectLocked && refW > 0) stickerHInput.value = round2(refH * (w / refW));
-    refW = w;
-    refH = parseFloat(stickerHInput.value) || refH;
-  }
-  recompute();
-}
-function onStickerHInput() {
-  const h = parseFloat(stickerHInput.value);
-  if (Number.isFinite(h) && h > 0) {
-    if (aspectLocked && refH > 0) stickerWInput.value = round2(refW * (h / refH));
-    refH = h;
-    refW = parseFloat(stickerWInput.value) || refW;
-  }
-  recompute();
-}
-stickerWInput.addEventListener("input", onStickerWInput);
-stickerHInput.addEventListener("input", onStickerHInput);
 
 // ── status helper ────────────────────────────────────────────────────────
 
@@ -131,13 +118,26 @@ function setStatus(message, kind) {
 
 async function switchMode(toShapeMode) {
   if (toShapeMode === shapeMode) return;
-  await startNewTask(); // don't leave stale analysis/preview from the other mode on screen
+  await startNewTask(); // don't leave stale items/preview from the other mode on screen
   shapeMode = toShapeMode;
   tabRectBtn.classList.toggle("is-active", !shapeMode);
   tabShapeBtn.classList.toggle("is-active", shapeMode);
+  bleedRow.hidden = !shapeMode;
 }
 tabRectBtn.addEventListener("click", () => switchMode(false));
 tabShapeBtn.addEventListener("click", () => switchMode(true));
+
+// ── card tabs (Tab 1 files / Tab 2 sheet+marks) ──────────────────────────
+
+function switchCardTab(tab) {
+  const filesActive = tab === "files";
+  cardTabFilesBtn.classList.toggle("is-active", filesActive);
+  cardTabParamsBtn.classList.toggle("is-active", !filesActive);
+  cardPanelFiles.hidden = !filesActive;
+  cardPanelParams.hidden = filesActive;
+}
+cardTabFilesBtn.addEventListener("click", () => switchCardTab("files"));
+cardTabParamsBtn.addEventListener("click", () => switchCardTab("params"));
 
 // ── config / bootstrap ───────────────────────────────────────────────────
 
@@ -197,6 +197,7 @@ dropzone.addEventListener("drop", (e) => {
 });
 fileInput.addEventListener("change", () => {
   if (fileInput.files.length) handleFiles(Array.from(fileInput.files));
+  fileInput.value = "";
 });
 
 function handleFiles(files) {
@@ -205,10 +206,7 @@ function handleFiles(files) {
     setStatus("Очікується файл PDF", "error");
     return;
   }
-  // Same single-vs-batch dispatch for both modes — shapeMode only decides
-  // which endpoints handleSingleFile()/handleBatchFiles() call internally.
-  if (pdfs.length === 1) handleSingleFile(pdfs[0]);
-  else handleBatchFiles(pdfs);
+  addFiles(pdfs); // always appends to the existing list, never replaces it
 }
 
 async function analyzeFile(file) {
@@ -227,220 +225,143 @@ async function analyzeShapeFile(file) {
   return res.json();
 }
 
-async function handleSingleFile(file) {
-  batchMode = false;
-  batchItems = [];
-  batchLayouts = [];
-  batchDetailIndex = null;
-  batchListEl.hidden = true;
-  batchListEl.innerHTML = "";
-  previewTitle.textContent = "Прев'ю розкладки";
-  singlePreviewBlock.hidden = false;
-  batchBackBtn.hidden = true;
-  batchPreviewBlock.hidden = true;
-  colsInput.disabled = false;
-  rowsInput.disabled = false;
-
-  setStatus("Аналіз файлу…");
-  try {
-    const data = shapeMode ? await analyzeShapeFile(file) : await analyzeFile(file);
-
-    analysis = data; // in shape mode this also carries `contour`
-    currentLayout = data.layout;
-    gridManual = false;
-
-    artworkFilename.textContent = data.filename;
-    artworkSize.textContent = `${fmt(data.dim_w)} × ${fmt(data.dim_h)} мм` +
-      (data.page_count > 1 ? ` (сторінок: ${data.page_count})` : "");
-    artworkInfo.hidden = false;
-
-    if (shapeMode) {
-      // Fixed size, read straight from the file — no W/H inputs, no lock/deform.
-      sizeRow.hidden = true;
-    } else {
-      stickerWInput.value = data.dim_w;
-      stickerHInput.value = data.dim_h;
-      refW = data.dim_w;
-      refH = data.dim_h;
-      setLockState(true);
-      sizeRow.hidden = false;
-    }
-
-    sheetSelect.value = data.sheet_name;
-    onSheetChanged();
-    orientationSelect.value = "";
-
-    setSectionEnabled(paramsCard, true);
-    setSectionEnabled(orderCard, true);
-    newTaskBtn.hidden = false;
-
-    renderLayout(currentLayout, analysis, !aspectLocked);
-    setStatus("", "");
-  } catch (err) {
-    setStatus(String(err.message || err), "error");
-  }
+function recomputeActualSize(it) {
+  if (!shapeMode) return;
+  it.actualW = round2(it.dim_w - 2 * appliedParams.bleedMm);
+  it.actualH = round2(it.dim_h - 2 * appliedParams.bleedMm);
 }
 
-async function handleBatchFiles(files) {
-  batchMode = true;
-  analysis = null;
-  currentLayout = null;
-
-  artworkInfo.hidden = true;
-  sizeRow.hidden = true;
-  previewTitle.textContent = "Прев'ю розкладки — пакетна обробка";
-  singlePreviewBlock.hidden = true;
-  batchBackBtn.hidden = true;
-  batchPreviewBlock.hidden = false;
-
-  batchListEl.hidden = false;
-  batchListEl.innerHTML = "";
-  batchItems = [];
-  batchLayouts = [];
-  batchDetailIndex = null;
-
-  setStatus(`Аналіз ${files.length} файлів…`);
-
-  const rows = files.map((file) => {
-    const row = document.createElement("div");
-    row.className = "batch-item";
-    row.textContent = `${file.name} — аналіз…`;
-    batchListEl.appendChild(row);
-    return row;
-  });
-
-  await Promise.all(files.map(async (file, i) => {
+async function addFiles(files) {
+  setStatus(`Аналіз ${files.length === 1 ? "файлу" : files.length + " файлів"}…`);
+  const newItems = await Promise.all(files.map(async (file) => {
     try {
       const data = shapeMode ? await analyzeShapeFile(file) : await analyzeFile(file);
-      batchItems.push(data);
-      rows[i].textContent = `${data.filename} — ${fmt(data.dim_w)} × ${fmt(data.dim_h)} мм`;
+      const item = {
+        upload_id: data.upload_id, filename: data.filename,
+        dim_w: data.dim_w, dim_h: data.dim_h, page_count: data.page_count,
+        thumbnail: data.thumbnail, contour: data.contour || null,
+        orientation: null, cols: null, rows: null, quantity: 1,
+        editDimW: null, editDimH: null, deform: false,
+        layout: null, layoutError: null,
+        actualW: null, actualH: null,
+      };
+      recomputeActualSize(item);
+      return item;
     } catch (err) {
-      rows[i].textContent = `${file.name} — помилка: ${err.message || err}`;
-      rows[i].classList.add("error");
+      setStatus(`«${file.name}»: ${err.message || err}`, "error");
+      return null;
     }
   }));
+  const ok = newItems.filter(Boolean);
+  items.push(...ok);
+  if (ok.length && selectedIndex === -1) selectedIndex = items.length - ok.length; // auto-select the first newly-added file if nothing was selected
 
-  sheetSelect.value = "SRA3";
-  onSheetChanged();
-  orientationSelect.value = "";
-
-  setSectionEnabled(paramsCard, true);
-  setSectionEnabled(orderCard, true);
-  // Manual grid override is ambiguous across differently-sized artworks in one batch.
-  colsInput.value = "";
-  rowsInput.value = "";
-  colsInput.disabled = true;
-  rowsInput.disabled = true;
-  gridManual = false;
-
-  newTaskBtn.hidden = false;
-
-  if (!batchItems.length) {
-    setStatus("Жоден файл не вдалося проаналізувати", "error");
-  } else {
-    setStatus(batchItems.length < files.length ? "Частину файлів не вдалося проаналізувати — див. список" : "", "");
+  if (items.length) {
+    setSectionEnabled(cardPanelParams, true);
+    newTaskBtn.hidden = false;
   }
-  await renderBatchSummary();
+  renderFileList();
+
+  if (items.length && !appliedParams.sheetW) {
+    // First file ever added this task: adopt whatever is currently sitting
+    // in Tab 2's inputs (config defaults) as the applied params — this also
+    // resolves layouts for every item and renders the preview.
+    await applyTab2Params();
+  } else {
+    await recomputeAllLayouts();
+    renderFileList();
+    renderSelectedPreview();
+  }
+  setStatus(ok.length < files.length ? "Частину файлів не вдалося проаналізувати" : "", "");
+  updateGenerateEnabled();
 }
 
-function fmt(v) {
-  return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+function removeItem(i) {
+  const it = items[i];
+  fetch(`/api/session/${it.upload_id}`, { method: "DELETE" }).catch(() => { /* best effort */ });
+  items.splice(i, 1);
+  if (selectedIndex === i) selectedIndex = items.length ? Math.min(i, items.length - 1) : -1;
+  else if (selectedIndex > i) selectedIndex -= 1;
+  renderFileList();
+  renderSelectedPreview();
+  updateGenerateEnabled();
+}
+
+function selectItem(i) {
+  selectedIndex = i;
+  renderFileList(); // to update the .is-selected highlight
+  renderSelectedPreview();
+}
+
+function renderFileList() {
+  fileListEl.innerHTML = "";
+  fileListEl.hidden = items.length === 0;
+  fileListEmptyEl.hidden = items.length > 0;
+  items.forEach((it, i) => {
+    const row = document.createElement("div");
+    row.className = "file-row" + (i === selectedIndex ? " is-selected" : "");
+    const fitOk = it.layout && it.layout.fits;
+    const fitLabel = it.layoutError ? "помилка" : (it.layout ? (fitOk ? "✓" : "!") : "…");
+    row.innerHTML = `
+      <button type="button" class="file-row-main">
+        <span class="file-row-name">${escapeHtml(it.filename)}</span>
+        <span class="file-row-size">${fmt(it.dim_w)} × ${fmt(it.dim_h)} мм${shapeMode && it.actualW != null ? ` (факт. ${fmt(it.actualW)} × ${fmt(it.actualH)})` : ""}</span>
+        <span class="file-row-fit ${it.layoutError || (it.layout && !fitOk) ? "is-nofit" : "is-fit"}">${fitLabel}</span>
+      </button>
+      <button type="button" class="file-row-icon file-row-props" title="Властивості" aria-label="Властивості">☰</button>
+      <button type="button" class="file-row-icon file-row-delete" title="Видалити" aria-label="Видалити">✕</button>
+    `;
+    row.querySelector(".file-row-main").addEventListener("click", () => selectItem(i));
+    row.querySelector(".file-row-props").addEventListener("click", (e) => { e.stopPropagation(); openPropsModal(i); });
+    row.querySelector(".file-row-delete").addEventListener("click", (e) => { e.stopPropagation(); removeItem(i); });
+    fileListEl.appendChild(row);
+  });
 }
 
 // ── new task (reset without reloading the page) ──────────────────────────
 
 async function startNewTask() {
-  const idsToDrop = analysis ? [analysis.upload_id] : batchItems.map((it) => it.upload_id);
+  const idsToDrop = items.map((it) => it.upload_id);
   await Promise.all(idsToDrop.map((id) =>
     fetch(`/api/session/${id}`, { method: "DELETE" }).catch(() => { /* best effort */ })
   ));
 
-  analysis = null;
-  currentLayout = null;
-  gridManual = false;
+  items = [];
+  selectedIndex = -1;
+  appliedParams = {
+    sheetName: "SRA3", sheetW: 0, sheetH: 0,
+    markOffset: 0, fieldMargin: 0,
+    bleedMm: 1.0,
+  };
 
-  batchMode = false;
-  batchItems = [];
-  batchLayouts = [];
-  batchDetailIndex = null;
-  batchAllFit = false;
-  batchListEl.hidden = true;
-  batchListEl.innerHTML = "";
-  batchSummaryEl.innerHTML = "";
-  previewTitle.textContent = "Прев'ю розкладки";
-  singlePreviewBlock.hidden = false;
-  batchBackBtn.hidden = true;
-  batchPreviewBlock.hidden = true;
+  closePropsModal();
+  renderFileList();
 
-  fileInput.value = "";
-  artworkInfo.hidden = true;
-  artworkFilename.textContent = "—";
-  artworkSize.textContent = "—";
-
-  sizeRow.hidden = true;
-  stickerWInput.value = "";
-  stickerHInput.value = "";
-  refW = 0;
-  refH = 0;
-  setLockState(true);
-
-  setSectionEnabled(paramsCard, false);
-  setSectionEnabled(orderCard, false);
+  setSectionEnabled(cardPanelParams, false);
   newTaskBtn.hidden = true;
+  switchCardTab("files");
 
   sheetSelect.value = "SRA3";
   onSheetChanged();
   markOffsetInput.value = config.defaults.mark_offset;
   fieldMarginInput.value = config.defaults.field_margin;
-  orientationSelect.value = "";
-  colsInput.value = "";
-  rowsInput.value = "";
-  colsInput.disabled = false;
-  rowsInput.disabled = false;
-  colsInput.removeAttribute("max");
-  rowsInput.removeAttribute("max");
-  cutContourCheckbox.checked = false;
+  bleedMmInput.value = "1";
+  paramsPendingHint.hidden = true;
+
+  cutContourCheckbox.checked = true;
 
   orderNumberInput.value = "";
   materialSelect.selectedIndex = 0;
   materialCustomRow.hidden = true;
   materialCustomInput.value = "";
-  quantityInput.value = "1";
 
-  previewSvg.innerHTML = "";
-  previewSvg.setAttribute("viewBox", "0 0 100 100");
-  previewFit.textContent = "";
-  previewFit.className = "pill";
-  previewStats.innerHTML = "";
+  renderSelectedPreview();
 
   setStatus("", "");
   updateGenerateEnabled();
 }
 
 newTaskBtn.addEventListener("click", startNewTask);
-
-// ── batch: drill into one file's full preview, and back ─────────────────
-
-function showBatchItemPreview(i) {
-  const entry = batchLayouts[i];
-  if (!entry || !entry.layout) return;
-  batchDetailIndex = i;
-  batchPreviewBlock.hidden = true;
-  singlePreviewBlock.hidden = false;
-  batchBackBtn.hidden = false;
-  previewTitle.textContent = `Прев'ю — ${entry.item.filename}`;
-  renderLayout(entry.layout, entry.item, false); // batch items never deform — no per-file resize UI
-}
-
-function showBatchList() {
-  batchDetailIndex = null;
-  singlePreviewBlock.hidden = true;
-  batchBackBtn.hidden = true;
-  batchPreviewBlock.hidden = false;
-  previewTitle.textContent = "Прев'ю розкладки — пакетна обробка";
-}
-
-batchBackBtn.addEventListener("click", showBatchList);
 
 // ── sheet / material toggle ──────────────────────────────────────────────
 
@@ -453,152 +374,193 @@ function onSheetChanged() {
     sheetHInput.value = preset.h;
   }
 }
-sheetSelect.addEventListener("change", () => { onSheetChanged(); recompute(); });
 
 materialSelect.addEventListener("change", () => {
   materialCustomRow.hidden = materialSelect.value !== config.custom_material;
   updateGenerateEnabled();
 });
 
-// ── live layout recompute ────────────────────────────────────────────────
+// ── Tab 2: buffered edits + one explicit Apply ───────────────────────────
 
-function debounce(fn, ms) {
-  let t;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
+function markParamsPending() {
+  paramsPendingHint.hidden = false;
+}
+[sheetSelect, sheetWInput, sheetHInput, markOffsetInput, fieldMarginInput, bleedMmInput]
+  .forEach((input) => input.addEventListener("input", markParamsPending));
+sheetSelect.addEventListener("change", () => { onSheetChanged(); markParamsPending(); });
+
+async function applyTab2Params() {
+  appliedParams = {
+    sheetName: sheetSelect.value,
+    sheetW: parseFloat(sheetWInput.value) || 0,
+    sheetH: parseFloat(sheetHInput.value) || 0,
+    markOffset: parseFloat(markOffsetInput.value) || 0,
+    fieldMargin: parseFloat(fieldMarginInput.value) || 0,
+    bleedMm: parseFloat(bleedMmInput.value) || 0,
   };
+  paramsPendingHint.hidden = true;
+  items.forEach(recomputeActualSize);
+  await recomputeAllLayouts();
+  renderFileList();
+  renderSelectedPreview();
+  updateGenerateEnabled();
 }
+paramsApplyBtn.addEventListener("click", applyTab2Params);
 
-// Cols/rows fields always display the current grid so they're editable in
-// place, but they only override the server's auto-fit once the user has
-// actually touched them — otherwise every other field edit would "freeze"
-// the grid at its last displayed size instead of re-optimizing. Shared by
-// collectLayoutInput() and generateShapeSingle() so a generate request can
-// never drift from the grid /api/layout already confirmed fits.
-function resolveManualGrid() {
-  const cols = parseInt(colsInput.value, 10);
-  const rows = parseInt(rowsInput.value, 10);
-  const useManualGrid = gridManual && Number.isFinite(cols) && cols > 0 && Number.isFinite(rows) && rows > 0;
-  return { cols: useManualGrid ? cols : null, rows: useManualGrid ? rows : null };
-}
+[orderNumberInput, materialCustomInput].forEach((input) =>
+  input.addEventListener("input", updateGenerateEnabled)
+);
 
-function collectLayoutInput() {
-  const sheetW = parseFloat(sheetWInput.value);
-  const sheetH = parseFloat(sheetHInput.value);
-  const { cols, rows } = resolveManualGrid();
-  // Shape mode has no size inputs — dim_w/dim_h always come straight from the
-  // analyzed file (they already include the bleed).
-  const dimW = shapeMode ? analysis.dim_w : (parseFloat(stickerWInput.value) || analysis.dim_w);
-  const dimH = shapeMode ? analysis.dim_h : (parseFloat(stickerHInput.value) || analysis.dim_h);
-  return {
+// ── per-item layout resolution ───────────────────────────────────────────
+
+async function fetchLayoutFor(it) {
+  const dimW = shapeMode ? it.dim_w : (it.editDimW ?? it.dim_w);
+  const dimH = shapeMode ? it.dim_h : (it.editDimH ?? it.dim_h);
+  if (!(appliedParams.sheetW > 0) || !(appliedParams.sheetH > 0)) {
+    return { layout: null, error: null };
+  }
+  const body = {
     dim_w: dimW,
     dim_h: dimH,
-    sheet_w: sheetW,
-    sheet_h: sheetH,
-    mark_offset: parseFloat(markOffsetInput.value) || 0,
-    field_margin: parseFloat(fieldMarginInput.value) || 0,
+    sheet_w: appliedParams.sheetW,
+    sheet_h: appliedParams.sheetH,
+    mark_offset: appliedParams.markOffset,
+    field_margin: appliedParams.fieldMargin,
     gap: 0,
-    orientation: orientationSelect.value || null,
-    cols,
-    rows,
+    orientation: it.orientation || null,
+    cols: it.cols || null,
+    rows: it.rows || null,
   };
-}
-
-function onGridInput() {
-  const colsEmpty = colsInput.value.trim() === "";
-  const rowsEmpty = rowsInput.value.trim() === "";
-  gridManual = !(colsEmpty && rowsEmpty);
-  recompute();
-}
-
-const recompute = debounce(async () => {
-  if (batchMode) { renderBatchSummary(); return; }
-  if (!analysis) return;
-  const body = collectLayoutInput();
-  if (!(body.sheet_w > 0) || !(body.sheet_h > 0)) return;
-
-  const seq = ++layoutRequestSeq;
   try {
     const res = await fetch("/api/layout", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (seq !== layoutRequestSeq) return; // superseded by a newer edit
     if (!res.ok) throw new Error((await res.json()).detail || "Помилка розрахунку розкладки");
-    currentLayout = await res.json();
-    renderLayout(currentLayout, analysis, !aspectLocked);
+    return { layout: await res.json(), error: null };
   } catch (err) {
-    setStatus(String(err.message || err), "error");
+    return { layout: null, error: String(err.message || err) };
   }
-}, 200);
-
-[sheetWInput, sheetHInput, markOffsetInput, fieldMarginInput, orientationSelect]
-  .forEach((input) => input.addEventListener("input", recompute));
-[colsInput, rowsInput].forEach((input) => input.addEventListener("input", onGridInput));
-
-// ── batch summary (one /api/layout call per file, shared sheet/margin/orientation) ─
-
-async function renderBatchSummary() {
-  if (!batchMode || !batchItems.length) {
-    batchSummaryEl.innerHTML = "";
-    batchAllFit = false;
-    updateGenerateEnabled();
-    return;
-  }
-  const sheetW = parseFloat(sheetWInput.value);
-  const sheetH = parseFloat(sheetHInput.value);
-  if (!(sheetW > 0) || !(sheetH > 0)) return;
-
-  const shared = {
-    sheet_w: sheetW, sheet_h: sheetH,
-    mark_offset: parseFloat(markOffsetInput.value) || 0,
-    field_margin: parseFloat(fieldMarginInput.value) || 0,
-    gap: 0,
-    orientation: orientationSelect.value || null,
-    cols: null, rows: null,
-  };
-
-  const seq = ++batchRequestSeq;
-  const results = await Promise.all(batchItems.map(async (item) => {
-    try {
-      const res = await fetch("/api/layout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...shared, dim_w: item.dim_w, dim_h: item.dim_h }),
-      });
-      if (!res.ok) throw new Error((await res.json()).detail || "помилка");
-      return { item, layout: await res.json(), error: null };
-    } catch (err) {
-      return { item, layout: null, error: String(err.message || err) };
-    }
-  }));
-  if (seq !== batchRequestSeq) return; // superseded by a newer edit
-
-  batchLayouts = results;
-  if (batchDetailIndex !== null) showBatchList(); // params changed — the open detail preview would be stale
-
-  batchSummaryEl.innerHTML = "";
-  let allFit = true;
-  results.forEach(({ item, layout, error }, i) => {
-    const ok = !error && layout && layout.fits;
-    if (!ok) allFit = false;
-    const row = document.createElement("div");
-    row.className = "batch-summary-row" + (layout ? " is-clickable" : "");
-    row.title = layout ? "Натисніть, щоб побачити повне прев'ю" : "";
-    row.innerHTML = `
-      <div class="bsr-name">${escapeHtml(item.filename)}</div>
-      <div class="bsr-size">${fmt(item.dim_w)} × ${fmt(item.dim_h)} мм</div>
-      <div class="bsr-grid">${layout ? `${layout.cols} × ${layout.rows} (${layout.count}/арк)` : "—"}</div>
-      <div class="bsr-status ${ok ? "ok" : "error"}">${error || (layout && layout.fits ? "вміщується" : "не вміщується")}</div>
-    `;
-    if (layout) row.addEventListener("click", () => showBatchItemPreview(i));
-    batchSummaryEl.appendChild(row);
-  });
-  batchAllFit = allFit;
-  updateGenerateEnabled();
 }
+
+async function recomputeAllLayouts() {
+  const seq = ++layoutRequestSeq;
+  const results = await Promise.all(items.map((it) => fetchLayoutFor(it)));
+  if (seq !== layoutRequestSeq) return; // superseded by a newer edit
+  results.forEach(({ layout, error }, i) => {
+    items[i].layout = layout;
+    items[i].layoutError = error;
+  });
+}
+
+// ── properties popup (per-file orientation/grid/quantity, +size/deform) ──
+
+let propsIndex = null;
+let propsAspectLocked = true;
+let draftRefW = 0, draftRefH = 0; // sticker W/H ratio anchor, local to the open popup
+
+function setPropsLockState(locked) {
+  propsAspectLocked = locked;
+  propsLockToggleBtn.classList.toggle("is-locked", locked);
+  propsLockToggleBtn.setAttribute("aria-pressed", String(locked));
+  propsLockToggleBtn.title = locked ? "Зберігати пропорції" : "Вільна зміна (деформація артворку)";
+  propsLockShacklePath.setAttribute("d", locked ? "M8 11V7a4 4 0 0 1 8 0v4" : "M8 11V7a4 4 0 0 1 7.5-3.8");
+  if (locked) {
+    draftRefW = parseFloat(propsWInput.value) || draftRefW;
+    draftRefH = parseFloat(propsHInput.value) || draftRefH;
+  }
+}
+propsLockToggleBtn.addEventListener("click", () => setPropsLockState(!propsAspectLocked));
+
+function onPropsWInput() {
+  const w = parseFloat(propsWInput.value);
+  if (Number.isFinite(w) && w > 0) {
+    if (propsAspectLocked && draftRefW > 0) propsHInput.value = round2(draftRefH * (w / draftRefW));
+    draftRefW = w;
+    draftRefH = parseFloat(propsHInput.value) || draftRefH;
+  }
+}
+function onPropsHInput() {
+  const h = parseFloat(propsHInput.value);
+  if (Number.isFinite(h) && h > 0) {
+    if (propsAspectLocked && draftRefH > 0) propsWInput.value = round2(draftRefW * (h / draftRefH));
+    draftRefH = h;
+    draftRefW = parseFloat(propsWInput.value) || draftRefW;
+  }
+}
+propsWInput.addEventListener("input", onPropsWInput);
+propsHInput.addEventListener("input", onPropsHInput);
+
+function openPropsModal(i) {
+  propsIndex = i;
+  const it = items[i];
+  propsModalFilename.textContent = it.filename;
+  propsSizeRow.hidden = shapeMode;
+  if (!shapeMode) {
+    const w = it.editDimW ?? it.dim_w;
+    const h = it.editDimH ?? it.dim_h;
+    propsWInput.value = w;
+    propsHInput.value = h;
+    draftRefW = w;
+    draftRefH = h;
+    setPropsLockState(!it.deform);
+  }
+  propsOrientation.value = it.orientation || "";
+  propsCols.value = it.cols ?? "";
+  propsRows.value = it.rows ?? "";
+  propsQuantity.value = it.quantity;
+  propsModalError.hidden = true;
+  propsModal.hidden = false;
+}
+
+function closePropsModal() {
+  propsModal.hidden = true;
+  propsIndex = null;
+}
+propsCancelBtn.addEventListener("click", closePropsModal);
+
+propsApplyBtn.addEventListener("click", async () => {
+  const idx = propsIndex;
+  if (idx === null) return;
+  const it = items[idx];
+  const cols = parseInt(propsCols.value, 10);
+  const rows = parseInt(propsRows.value, 10);
+  const draft = {
+    orientation: propsOrientation.value || null,
+    cols: Number.isFinite(cols) && cols > 0 ? cols : null,
+    rows: Number.isFinite(rows) && rows > 0 ? rows : null,
+    quantity: parseInt(propsQuantity.value, 10) || 1,
+    editDimW: shapeMode ? null : (parseFloat(propsWInput.value) || it.dim_w),
+    editDimH: shapeMode ? null : (parseFloat(propsHInput.value) || it.dim_h),
+    deform: shapeMode ? false : !propsAspectLocked,
+  };
+  // Validate against the shared sheet params before committing — same
+  // fits/doesn't-fit check the server will do, surfaced inline instead of
+  // silently accepting a grid that can't work. Note /api/layout returns
+  // HTTP 200 with fits:false for a grid that's merely too big for the
+  // sheet (not a request error), so that case needs its own check here —
+  // fetchLayoutFor's `error` only covers actual request failures.
+  const result = await fetchLayoutFor({ ...it, ...draft });
+  Object.assign(it, draft);
+  it.layout = result.layout;
+  it.layoutError = result.error;
+  if (result.error) {
+    propsModalError.textContent = result.error;
+    propsModalError.hidden = false;
+    return; // keep the modal open so the user can adjust
+  }
+  if (!result.layout || !result.layout.fits) {
+    it.layoutError = "Сітка не вміщується на аркуші з поточними параметрами";
+    propsModalError.textContent = it.layoutError;
+    propsModalError.hidden = false;
+    return; // keep the modal open so the user can adjust
+  }
+  closePropsModal();
+  renderFileList();
+  if (idx === selectedIndex) renderSelectedPreview();
+  updateGenerateEnabled();
+});
 
 // ── preview rendering ────────────────────────────────────────────────────
 
@@ -777,32 +739,90 @@ function renderLayout(layout, artwork, deform) {
     }
   }
 
-  previewFit.textContent = layout.fits ? "вміщується" : "не вміщується";
-  previewFit.className = "pill " + (layout.fits ? "fits" : "no-fit");
-
-  // reflect the resolved grid into the editable cols/rows fields, without
-  // clobbering what the user is actively typing, and cap what they can enter
-  colsInput.max = layout.max_cols;
-  rowsInput.max = layout.max_rows;
-  if (document.activeElement !== colsInput) colsInput.value = layout.cols;
-  if (document.activeElement !== rowsInput) rowsInput.value = layout.rows;
-
   previewStats.innerHTML = "";
-  const rowsData = [
+  const statsData = [
     ["Орієнтація", layout.orientation],
-    ["Розмір комірки", `${fmt(layout.cell_w)} × ${fmt(layout.cell_h)} мм`],
+    ["Комірка", `${fmt(layout.cell_w)} × ${fmt(layout.cell_h)}`],
     ["Сітка", `${layout.cols} × ${layout.rows}`],
-    ["Наклейок на аркуші", String(layout.count)],
+    ["На аркуші", String(layout.count)],
   ];
-  for (const [k, v] of rowsData) {
-    const dt = document.createElement("dt"); dt.textContent = k;
-    const dd = document.createElement("dd"); dd.textContent = v;
-    previewStats.appendChild(dt);
-    previewStats.appendChild(dd);
+  for (const [label, value] of statsData) {
+    const stat = document.createElement("div");
+    stat.className = "stat";
+    stat.innerHTML = `${label}<b>${escapeHtml(value)}</b>`;
+    previewStats.appendChild(stat);
   }
 
   updateGenerateEnabled();
 }
+
+function renderSelectedPreview() {
+  resetZoom();
+  const it = selectedIndex >= 0 ? items[selectedIndex] : null;
+  const hasLayout = !!(it && it.layout);
+  previewEmpty.hidden = hasLayout;
+  previewCanvas.hidden = !hasLayout;
+  previewStats.hidden = !hasLayout;
+  if (!hasLayout) {
+    previewTitle.textContent = "Прев'ю розкладки";
+    previewSvg.innerHTML = "";
+    previewStats.innerHTML = "";
+    return;
+  }
+  previewTitle.textContent = `Прев'ю — ${it.filename}`;
+  renderLayout(it.layout, it, shapeMode ? false : it.deform);
+}
+
+// ── preview zoom / pan ────────────────────────────────────────────────────
+
+let zoom = { scale: 1, tx: 0, ty: 0 };
+
+function applyZoomTransform() {
+  previewSvg.style.transform = `translate(${zoom.tx}px, ${zoom.ty}px) scale(${zoom.scale})`;
+}
+function resetZoom() {
+  zoom = { scale: 1, tx: 0, ty: 0 };
+  applyZoomTransform();
+}
+
+previewCanvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const rect = previewCanvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left - rect.width / 2;
+  const my = e.clientY - rect.top - rect.height / 2;
+  const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+  const newScale = Math.min(8, Math.max(1, zoom.scale * factor));
+  zoom.tx = mx - (mx - zoom.tx) * (newScale / zoom.scale);
+  zoom.ty = my - (my - zoom.ty) * (newScale / zoom.scale);
+  zoom.scale = newScale;
+  if (zoom.scale <= 1.001) { zoom.scale = 1; zoom.tx = 0; zoom.ty = 0; }
+  applyZoomTransform();
+}, { passive: false });
+
+let panning = false, panStartX = 0, panStartY = 0, panOrigTx = 0, panOrigTy = 0;
+previewCanvas.addEventListener("pointerdown", (e) => {
+  if (zoom.scale <= 1) return;
+  panning = true;
+  previewCanvas.setPointerCapture(e.pointerId);
+  panStartX = e.clientX; panStartY = e.clientY;
+  panOrigTx = zoom.tx; panOrigTy = zoom.ty;
+  previewCanvas.classList.add("is-panning");
+});
+previewCanvas.addEventListener("pointermove", (e) => {
+  if (!panning) return;
+  zoom.tx = panOrigTx + (e.clientX - panStartX);
+  zoom.ty = panOrigTy + (e.clientY - panStartY);
+  applyZoomTransform();
+});
+["pointerup", "pointercancel", "pointerleave"].forEach((evt) =>
+  previewCanvas.addEventListener(evt, () => { panning = false; previewCanvas.classList.remove("is-panning"); })
+);
+zoomInBtn.addEventListener("click", () => { zoom.scale = Math.min(8, zoom.scale * 1.3); applyZoomTransform(); });
+zoomOutBtn.addEventListener("click", () => {
+  zoom.scale = Math.max(1, zoom.scale / 1.3);
+  if (zoom.scale <= 1.001) resetZoom(); else applyZoomTransform();
+});
+zoomResetBtn.addEventListener("click", resetZoom);
 
 // ── generate enable/disable ──────────────────────────────────────────────
 
@@ -812,20 +832,10 @@ function effectiveMaterial() {
 }
 
 function updateGenerateEnabled() {
-  // Order number is optional — the print filename is simply built without it.
-  // shapeMode doesn't need its own branch here: batchMode/analysis/
-  // currentLayout/batchItems/batchAllFit are already populated the same way
-  // regardless of mode, so the existing single-vs-batch check covers both.
-  const materialOk = effectiveMaterial().length > 0 && parseInt(quantityInput.value, 10) > 0;
-  const ready = batchMode
-    ? batchItems.length > 0 && batchAllFit && materialOk
-    : !!analysis && !!currentLayout && currentLayout.fits && materialOk;
-  generateBtn.disabled = !ready;
+  const materialOk = effectiveMaterial().length > 0;
+  const allFit = items.length > 0 && items.every((it) => it.layout && it.layout.fits && it.quantity > 0);
+  generateBtn.disabled = !(allFit && materialOk);
 }
-
-[orderNumberInput, materialCustomInput, quantityInput].forEach((input) =>
-  input.addEventListener("input", updateGenerateEnabled)
-);
 
 function parseFilename(disposition) {
   const star = disposition.match(/filename\*=UTF-8''([^;]+)/i);
@@ -836,7 +846,7 @@ function parseFilename(disposition) {
   return plain ? plain[1] : null;
 }
 
-// ── generate & download ──────────────────────────────────────────────────
+// ── generate & download — always through the batch endpoints ────────────
 
 function downloadBlob(blob, fallbackFilename) {
   const url = URL.createObjectURL(blob);
@@ -866,94 +876,57 @@ async function postForZip(url, payload) {
   return { blob, filename };
 }
 
-async function generateSingle() {
-  if (!analysis || !currentLayout) return;
-  const payload = {
-    upload_id: analysis.upload_id,
-    layout: collectLayoutInput(),
-    sheet_name: sheetSelect.value,
-    order: orderNumberInput.value.trim(),
-    material: effectiveMaterial(),
-    quantity: parseInt(quantityInput.value, 10),
-    deform: !aspectLocked,
-    cut_contour: cutContourCheckbox.checked,
-  };
-  const { blob, filename } = await postForZip("/api/generate", payload);
-  downloadBlob(blob, filename);
-  setStatus("Готово. Файли завантажено: " + filename, "ok");
-}
-
-async function generateShapeSingle() {
-  if (!analysis || !currentLayout) return;
-  const { cols, rows } = resolveManualGrid();
-  const payload = {
-    upload_id: analysis.upload_id,
-    sheet_name: sheetSelect.value,
-    sheet_w: parseFloat(sheetWInput.value),
-    sheet_h: parseFloat(sheetHInput.value),
-    mark_offset: parseFloat(markOffsetInput.value) || 0,
-    field_margin: parseFloat(fieldMarginInput.value) || 0,
-    orientation: orientationSelect.value || null,
-    cols,
-    rows,
-    order: orderNumberInput.value.trim(),
-    material: effectiveMaterial(),
-    quantity: parseInt(quantityInput.value, 10),
-    cut_contour: cutContourCheckbox.checked,
-  };
-  const { blob, filename } = await postForZip("/api/generate-shape", payload);
-  downloadBlob(blob, filename);
-  setStatus("Готово. Файли завантажено: " + filename, "ok");
-}
-
 async function generateBatch() {
-  if (!batchItems.length) return;
   const payload = {
-    items: batchItems.map((it) => ({ upload_id: it.upload_id, dim_w: it.dim_w, dim_h: it.dim_h })),
-    sheet_name: sheetSelect.value,
-    sheet_w: parseFloat(sheetWInput.value),
-    sheet_h: parseFloat(sheetHInput.value),
-    mark_offset: parseFloat(markOffsetInput.value) || 0,
-    field_margin: parseFloat(fieldMarginInput.value) || 0,
-    orientation: orientationSelect.value || null,
+    items: items.map((it) => ({
+      upload_id: it.upload_id,
+      dim_w: it.editDimW ?? it.dim_w,
+      dim_h: it.editDimH ?? it.dim_h,
+      orientation: it.orientation,
+      cols: it.cols,
+      rows: it.rows,
+      quantity: it.quantity,
+      deform: it.deform,
+    })),
+    sheet_name: appliedParams.sheetName,
+    sheet_w: appliedParams.sheetW,
+    sheet_h: appliedParams.sheetH,
+    mark_offset: appliedParams.markOffset,
+    field_margin: appliedParams.fieldMargin,
     order: orderNumberInput.value.trim(),
     material: effectiveMaterial(),
-    quantity: parseInt(quantityInput.value, 10),
     cut_contour: cutContourCheckbox.checked,
   };
   const { blob, filename } = await postForZip("/api/generate-batch", payload);
   downloadBlob(blob, filename);
-  setStatus(`Готово. ${batchItems.length} файлів оброблено, завантажено: ${filename}`, "ok");
+  setStatus(`Готово. ${items.length} файл(ів) оброблено, завантажено: ${filename}`, "ok");
 }
 
 async function generateShapeBatch() {
-  if (!batchItems.length) return;
   const payload = {
-    items: batchItems.map((it) => ({ upload_id: it.upload_id })),
-    sheet_name: sheetSelect.value,
-    sheet_w: parseFloat(sheetWInput.value),
-    sheet_h: parseFloat(sheetHInput.value),
-    mark_offset: parseFloat(markOffsetInput.value) || 0,
-    field_margin: parseFloat(fieldMarginInput.value) || 0,
-    orientation: orientationSelect.value || null,
+    items: items.map((it) => ({
+      upload_id: it.upload_id, orientation: it.orientation, cols: it.cols, rows: it.rows, quantity: it.quantity,
+    })),
+    sheet_name: appliedParams.sheetName,
+    sheet_w: appliedParams.sheetW,
+    sheet_h: appliedParams.sheetH,
+    mark_offset: appliedParams.markOffset,
+    field_margin: appliedParams.fieldMargin,
     order: orderNumberInput.value.trim(),
     material: effectiveMaterial(),
-    quantity: parseInt(quantityInput.value, 10),
     cut_contour: cutContourCheckbox.checked,
+    bleed_mm: appliedParams.bleedMm,
   };
   const { blob, filename } = await postForZip("/api/generate-batch-shape", payload);
   downloadBlob(blob, filename);
-  setStatus(`Готово. ${batchItems.length} файлів оброблено, завантажено: ${filename}`, "ok");
+  setStatus(`Готово. ${items.length} файл(ів) оброблено, завантажено: ${filename}`, "ok");
 }
 
 generateBtn.addEventListener("click", async () => {
   generateBtn.disabled = true;
   setStatus("Генерація файлів…");
   try {
-    if (shapeMode && batchMode) await generateShapeBatch();
-    else if (shapeMode) await generateShapeSingle();
-    else if (batchMode) await generateBatch();
-    else await generateSingle();
+    if (shapeMode) await generateShapeBatch(); else await generateBatch();
   } catch (err) {
     setStatus(String(err.message || err), "error");
   } finally {
@@ -961,6 +934,10 @@ generateBtn.addEventListener("click", async () => {
   }
 });
 
-setSectionEnabled(paramsCard, false);
-setSectionEnabled(orderCard, false);
+// ── init ──────────────────────────────────────────────────────────────────
+
+setSectionEnabled(cardPanelParams, false);
+bleedRow.hidden = true;
+renderFileList();
+renderSelectedPreview();
 loadConfig();

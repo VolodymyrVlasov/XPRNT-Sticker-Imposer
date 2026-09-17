@@ -72,6 +72,7 @@ class BatchItem(BaseModel):
     cols: int | None = Field(default=None, ge=0)
     rows: int | None = Field(default=None, ge=0)
     quantity: int = Field(gt=0)
+    deform: bool = False
 
 
 class ContourSegment(BaseModel):
