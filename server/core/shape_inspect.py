@@ -5,9 +5,13 @@ Validates the file has both:
   - at least one vector path — the cut contour (every vector path in the file counts,
     no color/layer filtering)
 and extracts the vector geometry as a list of closed subpaths (lines + cubic beziers),
-in mm, positioned relative to the bleed-inclusive tile's own top-left corner (see
-"Bleed" section in the module's issuing prompt) — NOT relative to the raw cut-line
-bounding box.
+in mm, positioned relative to the PDF page's own top-left corner (its TrimBox, or
+MediaBox if no TrimBox is defined) — NOT relative to the cut-line's own bounding box.
+
+The sticker's tile size (dim_w/dim_h, which feeds the grid/imposition math) is the
+PDF page's own size. The cut-contour's bounding box is irrelevant to sizing — the
+contour can be any size, anywhere within the page. Bleed is a caller-supplied
+parameter used only to compute a separate "actual"/net size for display.
 
 Coordinate note: PyMuPDF's page-space coordinates (as returned by get_drawings/
 get_images) have their origin at the page's TOP-LEFT corner with Y increasing
@@ -18,7 +22,7 @@ PDF. So converting is just a division by MM, no axis flip needed.
 
 from dataclasses import dataclass, field
 
-from server.utils.constants import MM, SHAPE_BLEED_MM
+from server.utils.constants import MM
 
 # Tolerance (in PDF points) for treating two path endpoints as "the same point"
 # when grouping raw drawing items into subpaths / detecting closure.
@@ -45,16 +49,20 @@ class ContourSubpath:
 
 @dataclass
 class ShapeArtworkInfo:
-    dim_w: float  # bleed-inclusive tile width (contour bbox + 2*SHAPE_BLEED_MM)
-    dim_h: float  # bleed-inclusive tile height
-    bleed_mm: float
+    dim_w: float  # PDF page width (TrimBox if present else MediaBox), mm — feeds
+    # the grid/imposition math, exactly like before; just no longer bleed-derived.
+    dim_h: float
+    actual_w: float  # dim_w - 2*bleed_mm — the displayed "actual"/net sticker
+    # size (see module docstring). Display only — never feeds grid math.
+    actual_h: float
+    bleed_mm: float  # the bleed value actually used to compute actual_w/actual_h
     page_count: int
-    subpaths: list[ContourSubpath]  # coordinates relative to the dim_w x dim_h tile,
-    # i.e. already inset by bleed_mm on every side
-    bleed_box_pt: tuple[float, float, float, float]  # (x0, y0, x1, y1) — the cut
-    # contour's bbox expanded by the bleed on every side, in the SOURCE PDF's own
-    # point space (not mm, not yet re-based to the tile's own origin) — this is
-    # exactly the region extract_raster_only_pdf should crop the artwork to.
+    subpaths: list[ContourSubpath]  # coordinates relative to the PAGE's own
+    # top-left corner (mm) — i.e. relative to page_box_pt's own (x0, y0), not
+    # inset by any bleed amount.
+    page_box_pt: tuple[float, float, float, float]  # (x0, y0, x1, y1) — the
+    # page's own TrimBox (or MediaBox) in the SOURCE PDF's own point space. This
+    # is exactly the region extract_raster_only_pdf should crop the artwork to.
 
 
 def _load_with_all_layers_visible(path: str) -> "fitz.Document":
@@ -215,11 +223,11 @@ def _subpath_key(sp: "ContourSubpath") -> tuple:
 
 
 def extract_raster_only_pdf(
-    path: str, output_path: str, bleed_box_pt: tuple[float, float, float, float],
+    path: str, output_path: str, page_box_pt: tuple[float, float, float, float],
 ) -> None:
-    """Write a copy of page 0's raster image(s), CROPPED to `bleed_box_pt` (the
-    cut contour's bbox expanded by the bleed, in the source PDF's own point
-    space — see ShapeArtworkInfo.bleed_box_pt), with all vector paths stripped.
+    """Write a copy of page 0's raster image(s), CROPPED to `page_box_pt` (the
+    page's own TrimBox, or MediaBox if no TrimBox is defined — see
+    ShapeArtworkInfo.page_box_pt), with all vector paths stripped.
 
     The new page is sized exactly to that box, and images are re-inserted
     shifted so the box's own origin becomes (0, 0) — this is what gets tiled
@@ -242,7 +250,7 @@ def extract_raster_only_pdf(
                 "додайте зображення для друку як растровий об'єкт"
             )
 
-        box_x0, box_y0, box_x1, box_y1 = bleed_box_pt
+        box_x0, box_y0, box_x1, box_y1 = page_box_pt
 
         out = fitz.open()
         try:
@@ -260,7 +268,7 @@ def extract_raster_only_pdf(
         src.close()
 
 
-def inspect_shape_pdf(path: str) -> ShapeArtworkInfo:
+def inspect_shape_pdf(path: str, bleed_mm: float) -> ShapeArtworkInfo:
     """Raises ValueError with a clear Ukrainian message on any validation failure."""
     import fitz  # PyMuPDF
 
@@ -289,29 +297,31 @@ def inspect_shape_pdf(path: str) -> ShapeArtworkInfo:
                 "додайте векторні лінії, що визначають лінію різу"
             )
 
-        # Raw cut-contour bounding box, in PDF points, from ALL vector geometry.
-        raw_bbox = drawings[0]["rect"]
-        for d in drawings[1:]:
-            raw_bbox = raw_bbox | d["rect"]
+        page_box = page.trimbox  # falls back to MediaBox automatically when no
+        # TrimBox is defined on the page (verified empirically) — same convention
+        # as server/core/pdf_inspect.py's pypdf-based TrimBox-else-MediaBox logic.
 
-        bleed_pt = SHAPE_BLEED_MM * MM
-        offset_x = raw_bbox.x0 - bleed_pt
-        offset_y = raw_bbox.y0 - bleed_pt
-        bleed_box_pt = (offset_x, offset_y, raw_bbox.x1 + bleed_pt, raw_bbox.y1 + bleed_pt)
-
-        contour_w_mm = raw_bbox.width / MM
-        contour_h_mm = raw_bbox.height / MM
         # Round here, at the single source of truth both /api/analyze-shape and
         # /api/generate-shape call — otherwise PDF-roundtrip float noise (e.g.
         # 42.00000859830114) makes fmt_dim() treat whole numbers as fractional
         # and print filenames like "32.0x42.0" instead of "32x42". Sub-0.01mm
         # noise in the subpath coordinates themselves is well under cutting
         # precision and doesn't need the same treatment.
-        dim_w = round(contour_w_mm + 2 * SHAPE_BLEED_MM, 2)
-        dim_h = round(contour_h_mm + 2 * SHAPE_BLEED_MM, 2)
+        dim_w = round(page_box.width / MM, 2)
+        dim_h = round(page_box.height / MM, 2)
+        if dim_w <= 0 or dim_h <= 0:
+            raise ValueError("Некоректний розмір сторінки PDF")
+
+        actual_w = round(dim_w - 2 * bleed_mm, 2)
+        actual_h = round(dim_h - 2 * bleed_mm, 2)
+        if actual_w <= 0 or actual_h <= 0:
+            raise ValueError(
+                "Бліда завелика для розміру сторінки — фактичний розмір наліпки виходить "
+                "від'ємним або нульовим"
+            )
 
         def to_mm(p) -> tuple[float, float]:
-            return ((p.x - offset_x) / MM, (p.y - offset_y) / MM)
+            return ((p.x - page_box.x0) / MM, (p.y - page_box.y0) / MM)
 
         subpaths: list[ContourSubpath] = []
         for d in drawings:
@@ -348,10 +358,12 @@ def inspect_shape_pdf(path: str) -> ShapeArtworkInfo:
         return ShapeArtworkInfo(
             dim_w=dim_w,
             dim_h=dim_h,
-            bleed_mm=SHAPE_BLEED_MM,
+            actual_w=actual_w,
+            actual_h=actual_h,
+            bleed_mm=bleed_mm,
             page_count=doc.page_count,
             subpaths=subpaths,
-            bleed_box_pt=bleed_box_pt,
+            page_box_pt=(page_box.x0, page_box.y0, page_box.x1, page_box.y1),
         )
     finally:
         doc.close()

@@ -38,7 +38,7 @@ def generate_batch_shape(payload: ShapeBatchGenerateRequest, background_tasks: B
             # authoritative dim_w/dim_h and cut contour straight from the file,
             # same as the single-file endpoint.
             try:
-                info = inspect_shape_pdf(artwork_path)
+                info = inspect_shape_pdf(artwork_path, payload.bleed_mm)
             except ValueError as exc:
                 raise HTTPException(400, f"«{artwork_filename}»: {exc}") from exc
 
@@ -69,7 +69,7 @@ def generate_batch_shape(payload: ShapeBatchGenerateRequest, background_tasks: B
             item_base_name = f"{grid_base_name} - {extract_artwork_name(artwork_filename)}"
 
             raster_only_pdf = os.path.join(work_dir, f"_raster_only_{len(zip_items)}.pdf")
-            extract_raster_only_pdf(artwork_path, raster_only_pdf, info.bleed_box_pt)
+            extract_raster_only_pdf(artwork_path, raster_only_pdf, info.page_box_pt)
 
             plt_path = get_unique_path(work_dir, item_base_name + ".plt")
             generate_shape_plt(plt_path, grid, info.subpaths, info.dim_w, info.dim_h)

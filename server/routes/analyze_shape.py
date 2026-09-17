@@ -1,13 +1,13 @@
 import os
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from server import session_store
 from server.core.layout import resolve_grid
 from server.core.shape_inspect import inspect_shape_pdf
 from server.core.thumbnail import render_thumbnail_data_uri
 from server.models import ContourGeometry, ContourSegment, ContourSubpath, LayoutResult, ShapeAnalyzeResponse
-from server.utils.constants import DEFAULT_FIELD_MARGIN, DEFAULT_MARK_OFFSET, SHEET_PRESETS
+from server.utils.constants import DEFAULT_FIELD_MARGIN, DEFAULT_MARK_OFFSET, SHAPE_BLEED_MM, SHEET_PRESETS
 
 router = APIRouter()
 
@@ -15,7 +15,10 @@ MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 
 @router.post("/api/analyze-shape", response_model=ShapeAnalyzeResponse)
-async def analyze_shape(file: UploadFile = File(...)) -> ShapeAnalyzeResponse:
+async def analyze_shape(
+    file: UploadFile = File(...),
+    bleed_mm: float = Form(SHAPE_BLEED_MM),
+) -> ShapeAnalyzeResponse:
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Очікується файл PDF")
 
@@ -29,7 +32,7 @@ async def analyze_shape(file: UploadFile = File(...)) -> ShapeAnalyzeResponse:
     path, _ = session_store.get_upload(upload_id)
 
     try:
-        info = inspect_shape_pdf(path)
+        info = inspect_shape_pdf(path, bleed_mm)
     except ValueError as exc:
         session_store.drop_upload(upload_id)
         raise HTTPException(400, str(exc)) from exc
@@ -52,7 +55,6 @@ async def analyze_shape(file: UploadFile = File(...)) -> ShapeAnalyzeResponse:
     )
 
     contour = ContourGeometry(
-        bleed_mm=info.bleed_mm,
         subpaths=[
             ContourSubpath(
                 start=sp.start,
@@ -66,8 +68,11 @@ async def analyze_shape(file: UploadFile = File(...)) -> ShapeAnalyzeResponse:
     return ShapeAnalyzeResponse(
         upload_id=upload_id,
         filename=os.path.basename(path),
-        dim_w=round(info.dim_w, 2),
-        dim_h=round(info.dim_h, 2),
+        dim_w=info.dim_w,
+        dim_h=info.dim_h,
+        actual_w=info.actual_w,
+        actual_h=info.actual_h,
+        bleed_mm=info.bleed_mm,
         page_count=info.page_count,
         sheet_name=default_sheet,
         layout=LayoutResult(**grid.as_dict()),

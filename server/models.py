@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from server.utils.constants import SHAPE_BLEED_MM
+
 
 class LayoutInput(BaseModel):
     dim_w: float = Field(gt=0)
@@ -80,15 +82,17 @@ class ContourSubpath(BaseModel):
 
 
 class ContourGeometry(BaseModel):
-    bleed_mm: float
-    subpaths: list[ContourSubpath]  # relative to the dim_w x dim_h tile box below
+    subpaths: list[ContourSubpath]  # relative to the page's own top-left corner (mm)
 
 
 class ShapeAnalyzeResponse(BaseModel):
     upload_id: str
     filename: str
-    dim_w: float  # bleed-inclusive tile size — feeds the grid math
+    dim_w: float  # PDF page size (TrimBox/MediaBox) — feeds the grid math
     dim_h: float
+    actual_w: float  # dim_w - 2*bleed_mm — the "actual"/net size, for display
+    actual_h: float
+    bleed_mm: float
     page_count: int
     sheet_name: str
     layout: LayoutResult
@@ -110,6 +114,7 @@ class ShapeGenerateRequest(BaseModel):
     material: str
     quantity: int = Field(gt=0)
     cut_contour: bool = False
+    bleed_mm: float = Field(default=SHAPE_BLEED_MM, ge=0)
     # No dim_w/dim_h/gap/deform — the server re-derives the authoritative size
     # and contour by re-running inspect_shape_pdf on the stored upload, and
     # gap is always 0 for this mode.
@@ -131,9 +136,11 @@ class ShapeBatchGenerateRequest(BaseModel):
     material: str
     quantity: int = Field(gt=0)
     cut_contour: bool = False
+    bleed_mm: float = Field(default=SHAPE_BLEED_MM, ge=0)
     # No per-item dim_w/dim_h — re-derived server-side per item, same as
     # ShapeGenerateRequest. No cols/rows override — batch mode auto-fits per
-    # item only, matching the rectangular batch flow. No gap/deform.
+    # item only, matching the rectangular batch flow. No gap/deform. bleed_mm
+    # is shared across every item in the batch, same as sheet_name/material/etc.
 
 
 class BatchGenerateRequest(BaseModel):

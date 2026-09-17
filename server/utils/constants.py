@@ -11,7 +11,9 @@ DEFAULT_FIELD_MARGIN = 2.0
 DEFAULT_GAP = 0.0
 # HPGL cut overshoot past each line's true endpoint, so corners cut cleanly.
 OVERSHOOT = 1.0
-# Fixed print bleed around a shaped sticker's cut contour, on every side.
+# Default bleed for shaped stickers, used only to compute the displayed
+# "actual" (net/trim) sticker size as page_size - 2*bleed_mm — see
+# ShapeGenerateRequest.bleed_mm. Callers may override this per request.
 SHAPE_BLEED_MM = 1.0
 
 SHEET_PRESETS: dict[str, tuple[float, float]] = {
