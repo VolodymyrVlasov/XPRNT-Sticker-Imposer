@@ -24,6 +24,9 @@ from server.utils.constants import MM, SHAPE_BLEED_MM
 # when grouping raw drawing items into subpaths / detecting closure.
 _POINT_EPS = 0.05
 
+# Below this cumulative opacity, a drawing is treated as invisible/never painted.
+_OPACITY_EPS = 0.01
+
 
 @dataclass
 class ContourSegment:
@@ -112,6 +115,67 @@ def _group_subpaths_pt(items: list) -> list[list[tuple]]:
     return subpaths
 
 
+def _visible_drawings(page) -> list[dict]:
+    """page.get_drawings() (non-extended) reports every stroke/fill's LOCAL color
+    and width, but not the opacity of any transparency GROUP (Form XObject) it may
+    be nested inside — so a duplicate cut-line path hidden via 0% group opacity
+    (found on a real client file: Illustrator wraps each path in its own
+    transparency group on export, and a hidden "backup" copy had its group set to
+    opacity 0 instead of being deleted) still comes back looking like an ordinary,
+    fully visible stroke. get_drawings(extended=True) additionally interleaves
+    "group" entries (with their own opacity and nesting "level") in document
+    order, which lets us track cumulative opacity through nested groups and drop
+    anything that is not actually visible.
+    """
+    stack: list[tuple[int, float]] = []  # (level, cumulative opacity at this depth)
+
+    def current_opacity() -> float:
+        return stack[-1][1] if stack else 1.0
+
+    visible: list[dict] = []
+    for entry in page.get_drawings(extended=True):
+        level = entry.get("level", 0)
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+
+        etype = entry.get("type")
+        if etype == "group":
+            stack.append((level, current_opacity() * entry.get("opacity", 1.0)))
+        elif etype == "clip":
+            continue
+        elif entry.get("items"):
+            local = 1.0
+            so = entry.get("stroke_opacity")
+            fo = entry.get("fill_opacity")
+            if etype == "s" and so is not None:
+                local = so
+            elif etype == "f" and fo is not None:
+                local = fo
+            elif etype == "fs":
+                local = min(so if so is not None else 1.0, fo if fo is not None else 1.0)
+            if current_opacity() * local > _OPACITY_EPS:
+                visible.append(entry)
+    return visible
+
+
+# Rounding for the duplicate-detection fingerprint in _subpath_key(). Intentionally
+# much tighter than the ~0.01mm float-noise tolerance already accepted elsewhere in
+# this module (see the dim_w/dim_h rounding comment below) — this exists only to
+# catch true bit-for-bit duplicate paths, never to merge two subpaths that are
+# merely similar (e.g. a shape with a hole has two subpaths that must both survive).
+_DEDUP_DECIMALS = 3  # ~0.001mm
+
+
+def _subpath_key(sp: "ContourSubpath") -> tuple:
+    def r(v: float) -> float:
+        return round(v, _DEDUP_DECIMALS)
+
+    key = [("start", r(sp.start[0]), r(sp.start[1]))]
+    for seg in sp.segments:
+        key.append((seg.kind, tuple(r(v) for v in seg.points)))
+    return tuple(key)
+
+
 def extract_raster_only_pdf(
     path: str, output_path: str, bleed_box_pt: tuple[float, float, float, float],
 ) -> None:
@@ -180,7 +244,7 @@ def inspect_shape_pdf(path: str) -> ShapeArtworkInfo:
                 "додайте зображення для друку як растровий об'єкт"
             )
 
-        drawings = [d for d in page.get_drawings() if d.get("items")]
+        drawings = _visible_drawings(page)
         if not drawings:
             raise ValueError(
                 "У файлі не знайдено векторного контуру порізки — "
@@ -232,6 +296,16 @@ def inspect_shape_pdf(path: str) -> ShapeArtworkInfo:
                 last_end = raw_subpath[-1][2]
                 closed = _points_close(last_end, raw_subpath[0][1])
                 subpaths.append(ContourSubpath(start=start_mm, segments=segments, closed=closed))
+
+        seen: set = set()
+        deduped: list[ContourSubpath] = []
+        for sp in subpaths:
+            key = _subpath_key(sp)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(sp)
+        subpaths = deduped
 
         return ShapeArtworkInfo(
             dim_w=dim_w,
