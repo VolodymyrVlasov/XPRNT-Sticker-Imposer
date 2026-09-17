@@ -57,6 +57,44 @@ class ShapeArtworkInfo:
     # exactly the region extract_raster_only_pdf should crop the artwork to.
 
 
+def _load_with_all_layers_visible(path: str) -> "fitz.Document":
+    """Open the PDF with every Optional Content Group (Illustrator "layer")
+    forced to visible, regardless of the file's own default layer-visibility
+    state.
+
+    Real client files routinely have a layer toggled OFF/hidden in Illustrator —
+    most commonly the cut-contour layer, hidden for a clean design view while
+    still expected to be read by prepress/plotter tooling. Verified on a real
+    client file: a rounded-rect cut contour on a layer literally named "Різ"
+    (OFF by default in /OCProperties/D/OFF) was completely invisible to
+    page.get_drawings() — no trace of it at all, even in extended mode — while
+    the identical geometry on a visible layer was found normally.
+    page.get_image_info(xrefs=True) (used by extract_raster_only_pdf below) has
+    the same blind spot, so this is applied to raster extraction too, in case
+    the design/raster layer is ever the hidden one instead.
+
+    This only affects layer VISIBILITY, never which paths count as contour
+    geometry — every vector path in the file still counts regardless of which
+    layer it's on or what that layer is named, per this module's original
+    design (see the module docstring).
+
+    Note: doc.set_layer() alone updates the OCG config dict, but
+    get_drawings()/get_image_info() on the SAME live Document object do not
+    pick up the change — only a freshly (re)parsed document does, hence the
+    tobytes() + reopen round-trip below.
+    """
+    import fitz  # PyMuPDF
+
+    doc = fitz.open(path)
+    ocgs = doc.get_ocgs()
+    if not ocgs:
+        return doc
+    doc.set_layer(-1, on=list(ocgs.keys()), off=[])
+    buf = doc.tobytes()
+    doc.close()
+    return fitz.open(stream=buf, filetype="pdf")
+
+
 def _points_close(a, b) -> bool:
     return abs(a.x - b.x) <= _POINT_EPS and abs(a.y - b.y) <= _POINT_EPS
 
@@ -191,7 +229,7 @@ def extract_raster_only_pdf(
     """
     import fitz  # PyMuPDF
 
-    src = fitz.open(path)
+    src = _load_with_all_layers_visible(path)
     try:
         if src.page_count == 0:
             raise ValueError("PDF не містить сторінок")
@@ -227,7 +265,7 @@ def inspect_shape_pdf(path: str) -> ShapeArtworkInfo:
     import fitz  # PyMuPDF
 
     try:
-        doc = fitz.open(path)
+        doc = _load_with_all_layers_visible(path)
     except Exception as exc:
         raise ValueError(f"Не вдалося прочитати PDF: {exc}") from exc
 
