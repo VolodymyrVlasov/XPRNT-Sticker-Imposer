@@ -42,12 +42,13 @@ def generate_batch_shape(payload: ShapeBatchGenerateRequest, background_tasks: B
             except ValueError as exc:
                 raise HTTPException(400, f"«{artwork_filename}»: {exc}") from exc
 
-            # Batch mode always auto-fits, at the artwork's own native
-            # (bleed-inclusive) size — no per-item manual grid override, no gap.
+            # Each item resolves its own grid independently — explicit per-item
+            # orientation/cols/rows win, anything left unset auto-fits for that item
+            # alone. No gap in batch mode (unchanged).
             grid = resolve_grid(
                 info.dim_w, info.dim_h, payload.sheet_w, payload.sheet_h,
                 payload.mark_offset, payload.field_margin, 0,
-                orientation=payload.orientation,
+                orientation=item.orientation, cols=item.cols, rows=item.rows,
             )
             if not grid.fits:
                 raise HTTPException(
@@ -80,7 +81,7 @@ def generate_batch_shape(payload: ShapeBatchGenerateRequest, background_tasks: B
                 generate_shape_contour_pdf(contour_path, grid, info.subpaths, info.dim_w, info.dim_h)
 
             stickers_per_sheet = grid.count
-            sheets_needed = math.ceil(payload.quantity / stickers_per_sheet)
+            sheets_needed = math.ceil(item.quantity / stickers_per_sheet)
             actual_qty = sheets_needed * stickers_per_sheet
 
             size_str = f"{fmt_dim(min(grid.cell_w, grid.cell_h))}x{fmt_dim(max(grid.cell_w, grid.cell_h))}"

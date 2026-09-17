@@ -68,6 +68,10 @@ class BatchItem(BaseModel):
     upload_id: str
     dim_w: float = Field(gt=0)
     dim_h: float = Field(gt=0)
+    orientation: str | None = None
+    cols: int | None = Field(default=None, ge=0)
+    rows: int | None = Field(default=None, ge=0)
+    quantity: int = Field(gt=0)
 
 
 class ContourSegment(BaseModel):
@@ -122,6 +126,10 @@ class ShapeGenerateRequest(BaseModel):
 
 class ShapeBatchItem(BaseModel):
     upload_id: str
+    orientation: str | None = None
+    cols: int | None = Field(default=None, ge=0)
+    rows: int | None = Field(default=None, ge=0)
+    quantity: int = Field(gt=0)
 
 
 class ShapeBatchGenerateRequest(BaseModel):
@@ -131,16 +139,15 @@ class ShapeBatchGenerateRequest(BaseModel):
     sheet_h: float = Field(gt=0)
     mark_offset: float = Field(ge=0)
     field_margin: float = Field(ge=0)
-    orientation: str | None = None
     order: str
     material: str
-    quantity: int = Field(gt=0)
     cut_contour: bool = False
     bleed_mm: float = Field(default=SHAPE_BLEED_MM, ge=0)
     # No per-item dim_w/dim_h — re-derived server-side per item, same as
-    # ShapeGenerateRequest. No cols/rows override — batch mode auto-fits per
-    # item only, matching the rectangular batch flow. No gap/deform. bleed_mm
-    # is shared across every item in the batch, same as sheet_name/material/etc.
+    # ShapeGenerateRequest. bleed_mm is shared across every item in the batch,
+    # same as sheet_name/material/etc. orientation/cols/rows/quantity are now
+    # per-item (see ShapeBatchItem) — only sheet/margins/material/order/
+    # cut_contour/bleed_mm stay shared across the whole batch.
 
 
 class BatchGenerateRequest(BaseModel):
@@ -150,8 +157,6 @@ class BatchGenerateRequest(BaseModel):
     sheet_h: float = Field(gt=0)
     mark_offset: float = Field(ge=0)
     field_margin: float = Field(ge=0)
-    orientation: str | None = None
     order: str
     material: str
-    quantity: int = Field(gt=0)
     cut_contour: bool = False

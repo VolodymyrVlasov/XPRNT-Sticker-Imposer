@@ -35,12 +35,13 @@ def generate_batch(payload: BatchGenerateRequest, background_tasks: BackgroundTa
             except KeyError as exc:
                 raise HTTPException(404, f"{exc.args[0]} ({item.upload_id})") from exc
 
-            # Batch mode always auto-fits, at the artwork's own native size —
-            # no per-item manual grid/size override, no gap.
+            # Each item resolves its own grid independently — explicit per-item
+            # orientation/cols/rows win, anything left unset auto-fits for that item
+            # alone. No gap in batch mode (unchanged).
             grid = resolve_grid(
                 item.dim_w, item.dim_h, payload.sheet_w, payload.sheet_h,
                 payload.mark_offset, payload.field_margin, 0,
-                orientation=payload.orientation,
+                orientation=item.orientation, cols=item.cols, rows=item.rows,
             )
             if not grid.fits:
                 raise HTTPException(
@@ -70,7 +71,7 @@ def generate_batch(payload: BatchGenerateRequest, background_tasks: BackgroundTa
                 template_folders[folder_name] = files
 
             stickers_per_sheet = grid.count
-            sheets_needed = math.ceil(payload.quantity / stickers_per_sheet)
+            sheets_needed = math.ceil(item.quantity / stickers_per_sheet)
             actual_qty = sheets_needed * stickers_per_sheet
 
             size_str = f"{fmt_dim(min(grid.cell_w, grid.cell_h))}x{fmt_dim(max(grid.cell_w, grid.cell_h))}"
