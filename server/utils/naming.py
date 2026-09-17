@@ -1,9 +1,16 @@
+import math
 import os
 
 
 def fmt_dim(v: float) -> str:
-    """Drop trailing '.0' for whole-number dimensions."""
-    return str(int(v)) if v == int(v) else str(round(v, 2))
+    """Round to the nearest whole millimetre for display in filenames and the
+    on-sheet template caption — e.g. 49.38 -> "49". This only affects the
+    formatted label string; every actual layout/print/cut coordinate elsewhere
+    in the app keeps full float precision, untouched by this function.
+    Round-half-up (not Python's banker's-rounding `round()`) so e.g. 48.5 -> 49,
+    not 48 — the less surprising behavior for a human-readable label.
+    """
+    return str(math.floor(v + 0.5))
 
 
 def extract_artwork_name(artwork_filename: str) -> str:
