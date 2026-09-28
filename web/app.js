@@ -319,7 +319,37 @@ function selectItem(i) {
   renderSelectedPreview();
 }
 
+// ── file-row fit-status popover ──────────────────────────────────────────
+
+let fitPopoverEl = null;
+
+function hideFitPopover() {
+  if (fitPopoverEl) { fitPopoverEl.remove(); fitPopoverEl = null; }
+}
+
+function showFitPopover(anchorEl, text) {
+  hideFitPopover();
+  fitPopoverEl = document.createElement("div");
+  fitPopoverEl.className = "fit-popover";
+  fitPopoverEl.textContent = text;
+  document.body.appendChild(fitPopoverEl);
+  const r = anchorEl.getBoundingClientRect();
+  const p = fitPopoverEl.getBoundingClientRect();
+  let left = r.left + r.width / 2 - p.width / 2;
+  left = Math.max(8, Math.min(left, window.innerWidth - p.width - 8));
+  let top = r.top - p.height - 8;
+  if (top < 8) top = r.bottom + 8; // flip below the badge if there's no room above
+  fitPopoverEl.style.left = `${left}px`;
+  fitPopoverEl.style.top = `${top}px`;
+}
+
+// Safety net: don't leave a popover floating in place if the page scrolls
+// or resizes out from under its anchor.
+window.addEventListener("scroll", hideFitPopover, true);
+window.addEventListener("resize", hideFitPopover);
+
 function renderFileList() {
+  hideFitPopover(); // don't leave a stale popover from before this re-render
   fileListEl.innerHTML = "";
   fileListEl.hidden = items.length === 0;
   fileListEmptyEl.hidden = items.length > 0;
@@ -328,11 +358,12 @@ function renderFileList() {
     row.className = "file-row" + (i === selectedIndex ? " is-selected" : "");
     const fitOk = it.layout && it.layout.fits;
     const fitLabel = it.layoutError ? "помилка" : (it.layout ? (fitOk ? "✓" : "!") : "…");
+    const issueText = describeLayoutIssue(it);
     row.innerHTML = `
       <button type="button" class="file-row-main">
         <span class="file-row-name">${escapeHtml(it.filename)}</span>
         <span class="file-row-size">${fmt(it.dim_w)} × ${fmt(it.dim_h)} мм${shapeMode && it.actualW != null ? ` (факт. ${fmt(it.actualW)} × ${fmt(it.actualH)})` : ""}</span>
-        <span class="file-row-fit ${it.layoutError || (it.layout && !fitOk) ? "is-nofit" : "is-fit"}">${fitLabel}</span>
+        <span class="file-row-fit ${it.layoutError || (it.layout && !fitOk) ? "is-nofit" : "is-fit"}${issueText ? " has-issue" : ""}">${fitLabel}</span>
       </button>
       <button type="button" class="file-row-icon file-row-props" title="Властивості" aria-label="Властивості">☰</button>
       <button type="button" class="file-row-icon file-row-delete" title="Видалити" aria-label="Видалити">✕</button>
@@ -340,6 +371,11 @@ function renderFileList() {
     row.querySelector(".file-row-main").addEventListener("click", () => selectItem(i));
     row.querySelector(".file-row-props").addEventListener("click", (e) => { e.stopPropagation(); openPropsModal(i); });
     row.querySelector(".file-row-delete").addEventListener("click", (e) => { e.stopPropagation(); removeItem(i); });
+    if (issueText) {
+      const fitEl = row.querySelector(".file-row-fit");
+      fitEl.addEventListener("mouseenter", () => showFitPopover(fitEl, issueText));
+      fitEl.addEventListener("mouseleave", hideFitPopover);
+    }
     fileListEl.appendChild(row);
   });
 }
@@ -876,6 +912,25 @@ zoomOutBtn.addEventListener("click", () => {
 zoomResetBtn.addEventListener("click", resetZoom);
 
 // ── generate enable/disable ──────────────────────────────────────────────
+
+// Human-readable reason a file's fit-status badge isn't a plain "✓" — either
+// a real request-level error (already formatted), or, for the common
+// doesn't-fit-the-sheet case, a computed explanation with actual numbers.
+// Checked in this order deliberately: it.layout (with fits:false) carries
+// far more detail than the generic string the properties-popup handler
+// sometimes stores in it.layoutError for the same underlying case, so the
+// numeric explanation wins whenever a layout result is present at all.
+function describeLayoutIssue(it) {
+  if (it.layout && !it.layout.fits) {
+    const L = it.layout;
+    const maxCount = L.max_cols * L.max_rows;
+    return `Наклейка ${fmt(L.cell_w)} × ${fmt(L.cell_h)} мм не вміщується на аркуш ${fmt(L.sheet_w)} × ${fmt(L.sheet_h)} мм ` +
+      `(відступ мітки ${fmt(L.mark_offset)} мм + відступ поля ${fmt(L.field_margin)} мм): максимум ${L.max_cols} × ${L.max_rows}` +
+      `${maxCount ? ` (= ${maxCount} шт.)` : ""}, а задано ${L.cols} × ${L.rows}.`;
+  }
+  if (it.layoutError) return it.layoutError;
+  return null;
+}
 
 function effectiveMaterial() {
   if (materialSelect.value === config.custom_material) return materialCustomInput.value.trim();
