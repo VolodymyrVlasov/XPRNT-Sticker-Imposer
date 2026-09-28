@@ -26,7 +26,8 @@ from server.utils.constants import MM
 
 
 def generate_shape_print_pdf(
-    output_path: str, raster_only_pdf_path: str, grid: Grid, outline: bool = False,
+    output_path: str, raster_only_pdf_path: str, grid: Grid,
+    outline: bool = False, corner_mark: bool = False,
 ) -> None:
     from pypdf import PageObject, PdfReader, PdfWriter, Transformation
     from reportlab.pdfgen import canvas as rl_canvas
@@ -79,6 +80,9 @@ def generate_shape_print_pdf(
         marks_canvas.setFillColor(K100)
         marks_canvas.setStrokeColor(K100)
         draw_registration_marks(marks_canvas, grid)
+        if corner_mark:
+            from server.core.marks import draw_base_corner_guide
+            draw_base_corner_guide(marks_canvas, grid)
         marks_canvas.save()
         marks_reader = PdfReader(marks_path)
         page.merge_page(marks_reader.pages[0], over=True)

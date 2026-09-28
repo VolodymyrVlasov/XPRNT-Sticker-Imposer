@@ -123,6 +123,11 @@ class ShapeGenerateRequest(BaseModel):
     cut_contour: bool = False
     # Draw a 0.1mm solid black outline frame around every sticker cell.
     outline: bool = False
+    # Sticker-pack mode only: one base-corner guide mark near the sheet's
+    # top-left edge, for squaring up a manual guillotine pre-cut before the
+    # plotter does the precise die-cut. See server/core/marks.py's
+    # draw_base_corner_guide.
+    corner_mark: bool = False
     bleed_mm: float = Field(default=SHAPE_BLEED_MM, ge=0)
     # No dim_w/dim_h/gap/deform — the server re-derives the authoritative size
     # and contour by re-running inspect_shape_pdf on the stored upload, and
@@ -149,6 +154,7 @@ class ShapeBatchGenerateRequest(BaseModel):
     cut_contour: bool = False
     # Draw a 0.1mm solid black outline frame around every sticker cell.
     outline: bool = False
+    corner_mark: bool = False  # same as ShapeGenerateRequest's field above
     bleed_mm: float = Field(default=SHAPE_BLEED_MM, ge=0)
     # No per-item dim_w/dim_h — re-derived server-side per item, same as
     # ShapeGenerateRequest. bleed_mm is shared across every item in the batch,

@@ -108,3 +108,34 @@ def draw_cell_outlines(c, grid: Grid) -> None:
                 pt(grid.cell_w), pt(grid.cell_h),
                 fill=0, stroke=1,
             )
+
+
+# Base-corner guide for sticker-pack mode: two short open ticks near the
+# sheet's top-left corner, for squaring up a manual guillotine pre-cut
+# before the piece goes to the plotter for the precise die-cut. Spec called
+# for "7-8mm from the sheet edge" — picked the midpoint. Deliberately
+# open/thin ticks (crop-mark style), not filled L-brackets, so they read as
+# visually distinct from draw_registration_marks' filled corner brackets
+# even though they sit close to them at the default mark_offset=9mm (6mm
+# tick length keeps them clear of the registration mark's own 9mm-offset
+# start — re-verify this in the smoke test if mark_offset is ever set very
+# small).
+CORNER_GUIDE_OFFSET_MM = 7.5
+CORNER_GUIDE_LEN_MM = 6.0
+
+
+def draw_base_corner_guide(c, grid: Grid) -> None:
+    """Two short perpendicular ticks near the sheet's top-left corner —
+    sticker-pack mode only, print PDF only (see
+    server/core/shape_print_pdf.py). Caller must set stroke color first
+    (e.g. c.setStrokeColor(K100)), same convention as draw_registration_marks.
+    """
+    def pt(v: float) -> float:
+        return v * MM
+
+    o = CORNER_GUIDE_OFFSET_MM
+    length = CORNER_GUIDE_LEN_MM
+    sheet_h = grid.sheet_h
+    c.setLineWidth(pt(0.15))
+    c.line(pt(0), pt(sheet_h - o), pt(length), pt(sheet_h - o))  # tick along the top edge
+    c.line(pt(o), pt(sheet_h), pt(o), pt(sheet_h - length))       # tick along the left edge

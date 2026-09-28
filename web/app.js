@@ -4,6 +4,7 @@ const el = (id) => document.getElementById(id);
 
 const tabRectBtn = el("tab-rect");
 const tabShapeBtn = el("tab-shape");
+const tabPackBtn = el("tab-pack");
 
 const dropzone = el("dropzone");
 const fileInput = el("file-input");
@@ -66,6 +67,7 @@ const propsApplyBtn = el("props-apply");
 
 let config = null;
 let shapeMode = false; // "Фігурні стікери" sidebar tab — fixed size, cut-contour preview
+let isStickerPack = false; // only meaningful when shapeMode is true — "Стікерпаки" tab
 
 // items: always populated — one entry even for a single file.
 // {
@@ -131,16 +133,24 @@ function setStatus(message, kind) {
 
 // ── sidebar tabs / mode switch ───────────────────────────────────────────
 
-async function switchMode(toShapeMode) {
-  if (toShapeMode === shapeMode) return;
-  await startNewTask(); // don't leave stale items/preview from the other mode on screen
+async function switchMode(mode) {
+  // mode: "rect" | "shape" | "pack"
+  const toShapeMode = mode !== "rect";
+  const toPack = mode === "pack";
+  if (toShapeMode === shapeMode && toPack === isStickerPack) return;
+  // Set the mode flags BEFORE calling startNewTask() — it reads isStickerPack
+  // to pick the right bleed/outline defaults for the mode being switched TO.
   shapeMode = toShapeMode;
-  tabRectBtn.classList.toggle("is-active", !shapeMode);
-  tabShapeBtn.classList.toggle("is-active", shapeMode);
+  isStickerPack = toPack;
+  await startNewTask(); // don't leave stale items/preview from the other mode on screen
+  tabRectBtn.classList.toggle("is-active", mode === "rect");
+  tabShapeBtn.classList.toggle("is-active", mode === "shape");
+  tabPackBtn.classList.toggle("is-active", mode === "pack");
   bleedRow.hidden = !shapeMode;
 }
-tabRectBtn.addEventListener("click", () => switchMode(false));
-tabShapeBtn.addEventListener("click", () => switchMode(true));
+tabRectBtn.addEventListener("click", () => switchMode("rect"));
+tabShapeBtn.addEventListener("click", () => switchMode("shape"));
+tabPackBtn.addEventListener("click", () => switchMode("pack"));
 
 // ── card tabs (Tab 1 files / Tab 2 sheet+marks) ──────────────────────────
 
@@ -390,10 +400,11 @@ async function startNewTask() {
 
   items = [];
   selectedIndex = -1;
+  const bleedDefault = isStickerPack ? 2.0 : 1.0;
   appliedParams = {
     sheetName: "SRA3", sheetW: 0, sheetH: 0,
     markOffset: 0, fieldMargin: 0,
-    bleedMm: 1.0,
+    bleedMm: bleedDefault,
   };
 
   closePropsModal();
@@ -407,11 +418,11 @@ async function startNewTask() {
   onSheetChanged();
   markOffsetInput.value = config.defaults.mark_offset;
   fieldMarginInput.value = config.defaults.field_margin;
-  bleedMmInput.value = "1";
+  bleedMmInput.value = String(bleedDefault);
   paramsPendingHint.hidden = true;
 
   cutContourCheckbox.checked = true;
-  outlineCheckbox.checked = false;
+  outlineCheckbox.checked = isStickerPack;
 
   orderNumberInput.value = "";
   materialSelect.selectedIndex = 0;
@@ -709,6 +720,21 @@ function renderLayout(layout, artwork, deform) {
     const vy = dirY > 0 ? cy : cy - markLen;
     previewSvg.appendChild(svgEl("rect", {
       x: cx - markThick / 2, y: vy, width: markThick, height: markLen, fill: "#111111",
+    }));
+  }
+
+  if (isStickerPack) {
+    // Visual match for server/core/marks.py's draw_base_corner_guide — keep
+    // these two numbers in sync with CORNER_GUIDE_OFFSET_MM/CORNER_GUIDE_LEN_MM
+    // there if they ever change.
+    const guideOffset = 7.5, guideLen = 6;
+    previewSvg.appendChild(svgEl("line", {
+      x1: 0, y1: guideOffset, x2: guideLen, y2: guideOffset,
+      stroke: "#111111", "stroke-width": strokeW * 0.4,
+    }));
+    previewSvg.appendChild(svgEl("line", {
+      x1: guideOffset, y1: 0, x2: guideOffset, y2: guideLen,
+      stroke: "#111111", "stroke-width": strokeW * 0.4,
     }));
   }
 
@@ -1027,6 +1053,7 @@ async function generateShapeBatch() {
     cut_contour: cutContourCheckbox.checked,
     outline: outlineCheckbox.checked,
     bleed_mm: appliedParams.bleedMm,
+    corner_mark: isStickerPack,
   };
   const { blob, filename } = await postForZip("/api/generate-batch-shape", payload);
   downloadBlob(blob, filename);
