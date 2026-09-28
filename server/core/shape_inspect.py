@@ -31,6 +31,108 @@ _POINT_EPS = 0.05
 # Below this cumulative opacity, a drawing is treated as invisible/never painted.
 _OPACITY_EPS = 0.01
 
+# Layer-name keywords that identify a cut/contour layer, matched against a
+# normalized (lowercased, separators collapsed to spaces) layer name — see
+# _classify_layer_name below. English, Ukrainian, and Russian variants,
+# since real client files use all three depending on the designer. Beyond
+# the original starting set: "outline"/"cutter" (EN, common alternate names
+# for the same layer), "score"/"scoreline"/"score line" (EN, crease/score
+# lines live on the same layer as cut lines in practice), and
+# "штанц"/"штанцформа" (UA/RU professional print-shop term for a die,
+# borrowed from German "Stanze" — spelled identically in both languages).
+_CONTOUR_KEYWORDS = [
+    # English
+    "cut", "cutline", "cut line", "cutpath", "cut path", "cutting",
+    "contour", "dieline", "die line", "die", "die cut", "diecut",
+    "kiss", "kisscut", "kiss cut", "perf", "perforation",
+    "knife", "blade", "route", "rout", "laser", "plotter", "trim",
+    "outline", "cutter", "score", "scoreline", "score line",
+    # Ukrainian
+    "різ", "контур різу", "лінія різу", "різка", "висічка", "вирубка",
+    "ніж", "ножовий контур", "кісс", "кісс-різ", "кісс різ",
+    "перфорація", "лазер", "плотер", "різак", "штанц", "штанцформа",
+    # Russian
+    "рез", "контур реза", "линия реза", "резка", "высечка", "вырубка",
+    "нож", "ножевой контур", "кисс", "кисс-рез", "кисс рез",
+    "перфорация", "лазер", "плоттер", "резак",
+]
+
+# Secondary/optional — layer-name keywords that identify a print-content
+# layer. Not required for classification (see _classify_layer_name: a
+# layer is "print_content" by elimination once another layer confidently
+# matches _CONTOUR_KEYWORDS), but useful for logging/diagnostics and for
+# Prompt 2's UI to show a friendlier label than "unknown".
+_CONTENT_KEYWORDS = [
+    "print", "art", "artwork", "design", "content", "image", "graphic",
+    "graphics", "cmyk", "raster", "artboard",
+    "друк", "дизайн", "малюнок", "зображення", "растр", "контент", "макет",
+    "печать", "дизайн", "рисунок", "изображение", "растр", "контент", "макет",
+]
+
+
+def _normalize_layer_name(name: str) -> str:
+    norm = name.strip().lower()
+    for sep in ("-", "_", "."):
+        norm = norm.replace(sep, " ")
+    return " ".join(norm.split())
+
+
+def _layer_matches(norm_name: str, keywords: list[str]) -> bool:
+    return any(kw in norm_name for kw in keywords)
+
+
+def detect_layers(path: str) -> LayerDetectionResult:
+    """Read this PDF's OCG layers (if any) and classify each one as a likely
+    cut-contour or print-content source by name, using
+    _CONTOUR_KEYWORDS/_CONTENT_KEYWORDS. Purely diagnostic — does not change
+    what inspect_shape_pdf treats as contour geometry (that's Prompt 2).
+
+    Layer VISIBILITY (on/off) is irrelevant here, unlike _visible_drawings
+    below — doc.get_ocgs() lists every OCG regardless of its on/off state,
+    so this doesn't need _load_with_all_layers_visible's force-visible
+    round-trip.
+
+    Per-drawing OCG membership (which drawing belongs to which layer) is
+    NOT needed for this function's verdict — confirmed in the feasibility
+    spike for this feature that page.get_drawings(extended=True) already
+    reports the owning OCG's name directly as a "layer" key per drawing
+    entry, and an image XObject exposes it via its own /OC key — but
+    classification here only needs doc.get_ocgs()'s layer NAMES and COUNT,
+    not which specific drawing sits on which layer. That per-drawing
+    mapping is what Prompt 2 will need once it actually restricts
+    extraction to one layer.
+    """
+    import fitz  # PyMuPDF
+
+    doc = fitz.open(path)
+    try:
+        ocgs = doc.get_ocgs()
+    finally:
+        doc.close()
+
+    layers = [LayerInfo(xref=xref, name=info["name"], role="unknown") for xref, info in ocgs.items()]
+
+    if len(layers) < 2:
+        return LayerDetectionResult(classification="none", layers=layers, contour_layer_xref=None)
+
+    matches = [layer for layer in layers if _layer_matches(_normalize_layer_name(layer.name), _CONTOUR_KEYWORDS)]
+
+    if len(matches) == 1:
+        contour_layer = matches[0]
+        for layer in layers:
+            layer.role = "cut_contour" if layer.xref == contour_layer.xref else "print_content"
+        return LayerDetectionResult(
+            classification="confident", layers=layers, contour_layer_xref=contour_layer.xref,
+        )
+
+    # 0 or 2+ matches — can't tell automatically. Still surface a
+    # print_content guess (diagnostic signal only, doesn't affect
+    # classification) for any layer whose name matches _CONTENT_KEYWORDS.
+    for layer in layers:
+        if _layer_matches(_normalize_layer_name(layer.name), _CONTENT_KEYWORDS):
+            layer.role = "print_content"
+    return LayerDetectionResult(classification="ambiguous", layers=layers, contour_layer_xref=None)
+
 
 @dataclass
 class ContourSegment:
@@ -45,6 +147,20 @@ class ContourSubpath:
     start: tuple[float, float]
     segments: list[ContourSegment] = field(default_factory=list)
     closed: bool = False
+
+
+@dataclass
+class LayerInfo:
+    xref: int
+    name: str
+    role: str  # "cut_contour" | "print_content" | "unknown"
+
+
+@dataclass
+class LayerDetectionResult:
+    classification: str  # "none" | "confident" | "ambiguous"
+    layers: list[LayerInfo]
+    contour_layer_xref: int | None = None
 
 
 @dataclass
@@ -63,6 +179,9 @@ class ShapeArtworkInfo:
     page_box_pt: tuple[float, float, float, float]  # (x0, y0, x1, y1) — the
     # page's own TrimBox (or MediaBox) in the SOURCE PDF's own point space. This
     # is exactly the region extract_raster_only_pdf should crop the artwork to.
+    layer_info: LayerDetectionResult  # diagnostic only — see detect_layers().
+    # Independent of everything else on this dataclass; never feeds subpaths/
+    # dim_w/dim_h/anything else computed above.
 
 
 def _load_with_all_layers_visible(path: str) -> "fitz.Document":
@@ -355,6 +474,11 @@ def inspect_shape_pdf(path: str, bleed_mm: float) -> ShapeArtworkInfo:
             deduped.append(sp)
         subpaths = deduped
 
+        # Diagnostic only — see detect_layers()'s own docstring. Reads the
+        # file's OCG layer names independently of everything computed above;
+        # does not change dim_w/dim_h/subpaths/anything else in this function.
+        layer_info = detect_layers(path)
+
         return ShapeArtworkInfo(
             dim_w=dim_w,
             dim_h=dim_h,
@@ -364,6 +488,7 @@ def inspect_shape_pdf(path: str, bleed_mm: float) -> ShapeArtworkInfo:
             page_count=doc.page_count,
             subpaths=subpaths,
             page_box_pt=(page_box.x0, page_box.y0, page_box.x1, page_box.y1),
+            layer_info=layer_info,
         )
     finally:
         doc.close()

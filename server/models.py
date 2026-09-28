@@ -92,6 +92,24 @@ class ContourGeometry(BaseModel):
     subpaths: list[ContourSubpath]  # relative to the page's own top-left corner (mm)
 
 
+class LayerInfo(BaseModel):
+    xref: int
+    name: str
+    role: str  # "cut_contour" | "print_content" | "unknown"
+
+
+class LayerDetectionInfo(BaseModel):
+    # "none": 0 or 1 OCG layers found on the page — not a layered file,
+    #         existing flat single-pass extraction is authoritative.
+    # "confident": 2+ layers found and exactly one matched the cut-contour
+    #         keyword list — that layer is the suggested contour source.
+    # "ambiguous": 2+ layers found but 0 or 2+ of them matched the
+    #         cut-contour keyword list — can't tell automatically.
+    classification: str
+    layers: list[LayerInfo]
+    contour_layer_xref: int | None = None  # set only when classification == "confident"
+
+
 class ShapeAnalyzeResponse(BaseModel):
     upload_id: str
     filename: str
@@ -105,6 +123,11 @@ class ShapeAnalyzeResponse(BaseModel):
     layout: LayoutResult
     thumbnail: str
     contour: ContourGeometry
+    # Diagnostic only — see server/core/shape_inspect.py's detect_layers().
+    # Does not change dim_w/dim_h/contour/thumbnail above; nothing consumes
+    # this yet (Prompt 2 will use it to restrict contour extraction and add
+    # a manual-override UI for the "ambiguous" case).
+    layer_info: LayerDetectionInfo
 
 
 class ShapeGenerateRequest(BaseModel):

@@ -6,7 +6,15 @@ from server import session_store
 from server.core.layout import resolve_grid
 from server.core.shape_inspect import inspect_shape_pdf
 from server.core.thumbnail import render_thumbnail_data_uri
-from server.models import ContourGeometry, ContourSegment, ContourSubpath, LayoutResult, ShapeAnalyzeResponse
+from server.models import (
+    ContourGeometry,
+    ContourSegment,
+    ContourSubpath,
+    LayerDetectionInfo,
+    LayerInfo,
+    LayoutResult,
+    ShapeAnalyzeResponse,
+)
 from server.utils.constants import DEFAULT_FIELD_MARGIN, DEFAULT_MARK_OFFSET, SHAPE_BLEED_MM, SHEET_PRESETS
 
 router = APIRouter()
@@ -65,6 +73,15 @@ async def analyze_shape(
         ],
     )
 
+    layer_info = LayerDetectionInfo(
+        classification=info.layer_info.classification,
+        layers=[
+            LayerInfo(xref=layer.xref, name=layer.name, role=layer.role)
+            for layer in info.layer_info.layers
+        ],
+        contour_layer_xref=info.layer_info.contour_layer_xref,
+    )
+
     return ShapeAnalyzeResponse(
         upload_id=upload_id,
         filename=os.path.basename(path),
@@ -78,4 +95,5 @@ async def analyze_shape(
         layout=LayoutResult(**grid.as_dict()),
         thumbnail=thumbnail,
         contour=contour,
+        layer_info=layer_info,
     )
