@@ -117,6 +117,30 @@
         <div class="card preview-card">
           <div class="card-title" id="preview-title">Прев'ю розкладки</div>
           <div class="preview-head">
+            <div class="preview-view-controls">
+              <button type="button" class="view-mode-btn" id="view-mode-contour" title="Тільки контур порізки" aria-pressed="false">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="4 3"/>
+                </svg>
+              </button>
+              <button type="button" class="view-mode-btn" id="view-mode-print" title="Тільки друк" aria-pressed="false">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="16" rx="2"/>
+                  <circle cx="8.5" cy="9.5" r="1.5"/>
+                  <path d="M21 16l-5.5-5.5a2 2 0 0 0-2.8 0L3 20"/>
+                </svg>
+              </button>
+              <button type="button" class="view-mode-btn is-active" id="view-mode-together" title="Контур і друк разом" aria-pressed="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="7" width="13" height="13" rx="2"/>
+                  <path d="M8 7V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/>
+                </svg>
+              </button>
+              <span class="view-controls-divider" aria-hidden="true"></span>
+              <label class="contour-color-swatch" title="Колір контуру порізки">
+                <input type="color" id="contour-color-input" value="#00ff00">
+              </label>
+            </div>
             <div class="preview-zoom-controls">
               <button type="button" id="zoom-out" title="Зменшити">−</button>
               <button type="button" id="zoom-reset" title="Скинути масштаб">⤢</button>

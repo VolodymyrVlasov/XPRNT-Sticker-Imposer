@@ -49,6 +49,10 @@ const previewEmpty = el("preview-empty");
 const zoomInBtn = el("zoom-in");
 const zoomOutBtn = el("zoom-out");
 const zoomResetBtn = el("zoom-reset");
+const viewModeContourBtn = el("view-mode-contour");
+const viewModePrintBtn = el("view-mode-print");
+const viewModeTogetherBtn = el("view-mode-together");
+const contourColorInput = el("contour-color-input");
 
 const propsModal = el("props-modal");
 const propsModalFilename = el("props-modal-filename");
@@ -68,6 +72,11 @@ const propsApplyBtn = el("props-apply");
 let config = null;
 let shapeMode = false; // "Фігурні стікери" sidebar tab — fixed size, cut-contour preview
 let isStickerPack = false; // only meaningful when shapeMode is true — "Стікерпаки" tab
+// Preview-only display state — persists across file/task switches within
+// the session (unlike zoom, which resets per selection); not sent to the
+// server, doesn't affect anything generated.
+let viewMode = "together"; // "together" | "contour" | "print"
+let contourColor = "#00ff00";
 
 // items: always populated — one entry even for a single file.
 // {
@@ -723,6 +732,19 @@ function renderLayout(layout, artwork, deform) {
     }));
   }
 
+  // Feed-direction triangle — visual match for server/core/marks.py's
+  // _draw_feed_arrow. Keep these three numbers in sync with
+  // FEED_ARROW_WIDTH_MM/FEED_ARROW_HEIGHT_MM/FEED_ARROW_OFFSET_MM there if
+  // they ever change. Always drawn regardless of view mode — same as the
+  // corner registration marks above, this is a print-alignment mark, not
+  // per-cell content.
+  const feedApexY = 5, feedBaseY = 5 + 3, feedHalfW = 3 / 2;
+  const feedCx = sheetW / 2;
+  previewSvg.appendChild(svgEl("polygon", {
+    points: `${feedCx},${feedApexY} ${feedCx - feedHalfW},${feedBaseY} ${feedCx + feedHalfW},${feedBaseY}`,
+    fill: "#111111",
+  }));
+
   if (isStickerPack) {
     // Visual match for server/core/marks.py's draw_base_corner_guide — keep
     // these two numbers in sync with CORNER_GUIDE_OFFSET_MM/CORNER_GUIDE_LEN_MM
@@ -775,49 +797,65 @@ function renderLayout(layout, artwork, deform) {
     }
   }
 
+  // View mode gates per-cell content only; sheet-level framing above is
+  // always drawn.
+  const showPrint = viewMode !== "contour";
+  const showContour = viewMode !== "print";
+
   for (let row = 0; row < layout.rows; row++) {
     for (let col = 0; col < layout.cols; col++) {
       const cellX = layout.grid_x + col * strideX;
       const cellY = layout.grid_y + row * strideY;
 
-      if (!hasThumb) {
+      if (showPrint && !hasThumb) {
         previewSvg.appendChild(svgEl("rect", {
           x: cellX, y: cellY, width: layout.cell_w, height: layout.cell_h,
           fill: "#e3e3e3", stroke: "none",
         }));
-      } else {
+      }
+
+      const wantsNestedSvg = hasThumb && (showPrint || (shapeMode && showContour));
+      if (wantsNestedSvg) {
         // Nested <svg> clips to the cell automatically, so rotated/oversized
-        // artwork never bleeds past the cut line.
+        // artwork never bleeds past the cut line. Built whenever EITHER the
+        // image or the shape-mode contour path needs to render, since both
+        // share this same clip/transform container — only append the pieces
+        // the current view mode actually wants.
         const nested = svgEl("svg", {
           x: cellX, y: cellY, width: layout.cell_w, height: layout.cell_h,
           viewBox: `0 0 ${layout.cell_w} ${layout.cell_h}`,
         });
-        const image = svgEl("image", { preserveAspectRatio: "none" });
-        image.setAttribute("href", artwork.thumbnail);
-        image.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", artwork.thumbnail);
-        if (rotate) {
-          // Pre-rotation box is W/H swapped, centered on the same point the
-          // final (post-rotation) box would occupy, then rotated 90° about that center.
-          image.setAttribute("x", rotCx - fitH / 2);
-          image.setAttribute("y", rotCy - fitW / 2);
-          image.setAttribute("width", fitH);
-          image.setAttribute("height", fitW);
-          image.setAttribute("transform", `rotate(90 ${rotCx} ${rotCy})`);
-        } else {
-          image.setAttribute("x", padX);
-          image.setAttribute("y", padY);
-          image.setAttribute("width", fitW);
-          image.setAttribute("height", fitH);
-        }
-        nested.appendChild(image);
 
-        if (shapeMode && artwork.contour) {
-          // Cut-contour outline, sharing the exact same translate/rotate as the
-          // image above so it always lines up with the raster underneath it.
+        if (showPrint) {
+          const image = svgEl("image", { preserveAspectRatio: "none" });
+          image.setAttribute("href", artwork.thumbnail);
+          image.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", artwork.thumbnail);
+          if (rotate) {
+            // Pre-rotation box is W/H swapped, centered on the same point the
+            // final (post-rotation) box would occupy, then rotated 90° about that center.
+            image.setAttribute("x", rotCx - fitH / 2);
+            image.setAttribute("y", rotCy - fitW / 2);
+            image.setAttribute("width", fitH);
+            image.setAttribute("height", fitW);
+            image.setAttribute("transform", `rotate(90 ${rotCx} ${rotCy})`);
+          } else {
+            image.setAttribute("x", padX);
+            image.setAttribute("y", padY);
+            image.setAttribute("width", fitW);
+            image.setAttribute("height", fitH);
+          }
+          nested.appendChild(image);
+        }
+
+        if (shapeMode && artwork.contour && showContour) {
+          // Cut-contour outline, sharing the exact same translate/rotate the
+          // image above uses (when present) so it always lines up with the
+          // raster underneath it. Color is the user's chosen contourColor
+          // (preview-only — the generated contour PDF is unaffected).
           const path = svgEl("path", {
             d: contourPathD(artwork.contour.subpaths),
             fill: "none",
-            stroke: "#000000",
+            stroke: contourColor,
             "stroke-width": strokeW * 0.5,
             "stroke-dasharray": `${strokeW * 1.2},${strokeW * 0.8}`,
           });
@@ -830,12 +868,13 @@ function renderLayout(layout, artwork, deform) {
         previewSvg.appendChild(nested);
       }
 
-      if (!shapeMode) {
-        // Shape-mode cells get the traced cut contour (added above) as their
-        // border instead of a plain rectangle.
+      if (!shapeMode && showContour) {
+        // Rectangular mode has no traced vector contour — the cell edge
+        // itself is the cut line, so it plays the "контур" role here.
+        // Color is the user's chosen contourColor (preview-only).
         previewSvg.appendChild(svgEl("rect", {
           x: cellX, y: cellY, width: layout.cell_w, height: layout.cell_h,
-          fill: "none", stroke: "#111111", "stroke-width": strokeW * 0.6,
+          fill: "none", stroke: contourColor, "stroke-width": strokeW * 0.6,
         }));
       }
 
@@ -936,6 +975,34 @@ zoomOutBtn.addEventListener("click", () => {
   if (zoom.scale <= 1.001) resetZoom(); else applyZoomTransform();
 });
 zoomResetBtn.addEventListener("click", resetZoom);
+
+// ── preview view mode / contour color ────────────────────────────────────
+
+// Re-renders the current layout in place — deliberately NOT via
+// renderSelectedPreview(), which would also reset zoom/pan (annoying when
+// zoomed in to inspect a contour and toggling view mode or color).
+function rerenderPreviewKeepZoom() {
+  const it = selectedIndex >= 0 ? items[selectedIndex] : null;
+  if (it && it.layout) renderLayout(it.layout, it, shapeMode ? false : it.deform);
+}
+
+function setViewMode(mode) {
+  viewMode = mode;
+  for (const [btn, m] of [[viewModeContourBtn, "contour"], [viewModePrintBtn, "print"], [viewModeTogetherBtn, "together"]]) {
+    const active = m === mode;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", String(active));
+  }
+  rerenderPreviewKeepZoom();
+}
+viewModeContourBtn.addEventListener("click", () => setViewMode("contour"));
+viewModePrintBtn.addEventListener("click", () => setViewMode("print"));
+viewModeTogetherBtn.addEventListener("click", () => setViewMode("together"));
+
+contourColorInput.addEventListener("input", () => {
+  contourColor = contourColorInput.value;
+  rerenderPreviewKeepZoom();
+});
 
 // ── generate enable/disable ──────────────────────────────────────────────
 

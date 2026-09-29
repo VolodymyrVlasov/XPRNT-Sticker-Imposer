@@ -523,9 +523,40 @@ body {
 .preview-head {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   margin-bottom: 12px;
 }
+.preview-view-controls { display: flex; align-items: center; gap: 4px; }
+.view-mode-btn {
+  width: 28px; height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--muted);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.view-mode-btn:hover { background: var(--surface); color: var(--fg); }
+.view-mode-btn.is-active { background: var(--ink); color: #fff; border-color: var(--ink); }
+.view-controls-divider { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
+.contour-color-swatch {
+  width: 28px; height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  display: flex;
+  padding: 0;
+  cursor: pointer;
+}
+.contour-color-swatch input[type="color"] {
+  flex: none;
+  width: calc(100% + 8px); height: calc(100% + 8px);
+  border: none; padding: 0; margin: -4px;
+  cursor: pointer; background: none;
+}
+.contour-color-swatch input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.contour-color-swatch input[type="color"]::-webkit-color-swatch { border: none; }
+.contour-color-swatch input[type="color"]::-moz-color-swatch { border: none; }
 .preview-zoom-controls { display: flex; gap: 4px; }
 .preview-zoom-controls button {
   width: 28px; height: 28px;
@@ -542,9 +573,9 @@ body {
 .preview-canvas {
   flex: 1;
   min-height: 0;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -592,6 +623,7 @@ body {
   .primary-btn { color: #111111; }
   .primary-btn:disabled { background: #444444; color: #8a8a8a; }
   .sidebar-tab.is-active { color: #111111; }
+  .view-mode-btn.is-active { color: #111111; }
   .fit-popover { color: #111111; }
   .dropzone:hover, .dropzone.dragover { background: #232323; }
   .file-row.is-selected { background: #333333; box-shadow: inset 2px 0 0 var(--ink); }
