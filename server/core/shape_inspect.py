@@ -20,6 +20,8 @@ server/core/layout.py's module docstring), confirmed empirically with a syntheti
 PDF. So converting is just a division by MM, no axis flip needed.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from server.utils.constants import MM
