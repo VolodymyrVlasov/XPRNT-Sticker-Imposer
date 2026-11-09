@@ -20,6 +20,12 @@
       </svg>
       <h1>XPRNT <span>STIKER IMPOSER</span></h1>
     </div>
+    <button type="button" class="settings-btn" id="settings-btn" title="Налаштування" aria-label="Налаштування">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
   </div>
 </header>
 
@@ -54,11 +60,6 @@
 
             <div class="file-list" id="file-list"></div>
             <div class="file-list-empty" id="file-list-empty">Файли ще не завантажено</div>
-
-            <div class="field-row" id="cut-contour-row">
-              <label for="cut-contour-checkbox">Векторний PDF контуру різу (для сторонніх програм)</label>
-              <input type="checkbox" id="cut-contour-checkbox" checked>
-            </div>
           </div>
 
           <div class="card-tab-panel" id="card-panel-params" hidden>
@@ -216,6 +217,33 @@
     <div class="modal-actions">
       <button type="button" class="ghost-btn" id="props-cancel">Скасувати</button>
       <button type="button" class="primary-btn" id="props-apply">Застосувати</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="settings-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="modal-title" id="settings-modal-title">Налаштування</div>
+
+    <div class="field-row settings-keywords-row">
+      <label>Ключові слова для пошуку шару контуру порізки</label>
+      <div class="settings-keywords" id="settings-keywords-list"></div>
+      <div class="settings-keyword-add">
+        <input type="text" id="settings-keyword-input" placeholder="Нове слово…">
+        <button type="button" class="ghost-btn" id="settings-keyword-add-btn">Додати</button>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <label for="cut-contour-checkbox">Векторний PDF контуру різу (для сторонніх програм)</label>
+      <input type="checkbox" id="cut-contour-checkbox">
+    </div>
+
+    <div class="modal-error" id="settings-modal-error" hidden></div>
+
+    <div class="modal-actions">
+      <button type="button" class="ghost-btn" id="settings-cancel">Скасувати</button>
+      <button type="button" class="primary-btn" id="settings-apply">Застосувати</button>
     </div>
   </div>
 </div>

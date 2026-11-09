@@ -75,6 +75,17 @@ body {
   gap: 12px;
 }
 .brand-logo { flex: none; }
+.settings-btn {
+  margin-left: auto;
+  width: 36px; height: 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--muted);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.settings-btn:hover { background: var(--surface); color: var(--fg); }
 .brand h1 {
   margin: 0;
   font-size: 24px;
@@ -448,6 +459,26 @@ body {
 .modal-filename { font-size: 12px; color: var(--muted); margin-bottom: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modal-error { font-size: 12px; color: var(--danger); margin-top: 8px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+/* settings popup — keyword chips (reuses the modal/field-row styles above) */
+.field-row.settings-keywords-row { flex-direction: column; align-items: stretch; gap: 8px; }
+.settings-keywords { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-keywords:empty::before { content: "Немає власних слів"; font-size: 12px; color: var(--muted); }
+.settings-keyword-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 4px 3px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 12px;
+}
+.settings-keyword-chip button {
+  border: none; background: none; cursor: pointer;
+  color: var(--muted); font-size: 11px; line-height: 1; padding: 2px 4px;
+}
+.settings-keyword-chip button:hover { color: var(--danger); }
+.settings-keyword-add { display: flex; gap: 8px; }
+.field-row .settings-keyword-add input { flex: 1; width: auto; }
 
 /* ── buttons ──────────────────────────────────────────────────────────── */
 

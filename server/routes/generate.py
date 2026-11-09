@@ -83,6 +83,6 @@ def generate(payload: GenerateRequest, background_tasks: BackgroundTasks) -> Fil
     return FileResponse(
         zip_path,
         media_type="application/zip",
-        filename=f"{folder_name}.zip",
+        filename=f"{payload.order.strip() + ' - ' if payload.order.strip() else ''}{folder_name}.zip",
         background=background_tasks,
     )

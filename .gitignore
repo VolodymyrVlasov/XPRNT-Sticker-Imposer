@@ -3,3 +3,6 @@
 .venv/
 *.egg-info/
 .claude/settings.local.json
+
+# Machine-local runtime state (app settings JSON) — not source.
+data/

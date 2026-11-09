@@ -89,6 +89,6 @@ def generate_shape(payload: ShapeGenerateRequest, background_tasks: BackgroundTa
     return FileResponse(
         zip_path,
         media_type="application/zip",
-        filename=f"{base_name}.zip",
+        filename=f"{payload.order.strip() + ' - ' if payload.order.strip() else ''}{base_name}.zip",
         background=background_tasks,
     )
