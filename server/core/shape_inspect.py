@@ -3,7 +3,8 @@
 Validates the file has both:
   - at least one raster (image) object — the print artwork
   - at least one vector path — the cut contour (every vector path in the file counts,
-    no color/layer filtering)
+    no color filtering; restricted to one OCG layer only when detect_layers() is
+    "confident" or the caller picks a layer — see inspect_shape_pdf)
 and extracts the vector geometry as a list of closed subpaths (lines + cubic beziers),
 in mm, positioned relative to the PDF page's own top-left corner (its TrimBox, or
 MediaBox if no TrimBox is defined) — NOT relative to the cut-line's own bounding box.
@@ -181,9 +182,10 @@ class ShapeArtworkInfo:
     page_box_pt: tuple[float, float, float, float]  # (x0, y0, x1, y1) — the
     # page's own TrimBox (or MediaBox) in the SOURCE PDF's own point space. This
     # is exactly the region extract_raster_only_pdf should crop the artwork to.
-    layer_info: LayerDetectionResult  # diagnostic only — see detect_layers().
-    # Independent of everything else on this dataclass; never feeds subpaths/
-    # dim_w/dim_h/anything else computed above.
+    layer_info: LayerDetectionResult  # see detect_layers(). Its verdict may
+    # restrict which drawings become `subpaths` (see inspect_shape_pdf), but it
+    # is always the file-level snapshot — never reflects a caller's manual pick.
+    # Never feeds dim_w/dim_h.
 
 
 def _load_with_all_layers_visible(path: str) -> "fitz.Document":
@@ -389,8 +391,16 @@ def extract_raster_only_pdf(
         src.close()
 
 
-def inspect_shape_pdf(path: str, bleed_mm: float) -> ShapeArtworkInfo:
-    """Raises ValueError with a clear Ukrainian message on any validation failure."""
+def inspect_shape_pdf(
+    path: str, bleed_mm: float, contour_layer_xref: int | None = None,
+) -> ShapeArtworkInfo:
+    """Raises ValueError with a clear Ukrainian message on any validation failure.
+
+    contour_layer_xref: request-scoped manual pick of the cut-contour OCG layer.
+    When None, a "confident" detect_layers() verdict restricts extraction to its
+    detected layer; otherwise (no layers / "ambiguous" with no pick) every
+    visible vector path counts, exactly as before layer detection existed.
+    """
     import fitz  # PyMuPDF
 
     try:
@@ -411,12 +421,36 @@ def inspect_shape_pdf(path: str, bleed_mm: float) -> ShapeArtworkInfo:
                 "додайте зображення для друку як растровий об'єкт"
             )
 
+        # Needed before subpath extraction now — its verdict decides which
+        # drawings count as contour (see the filter below). Always the full,
+        # file-level snapshot; never altered by the manual contour_layer_xref.
+        layer_info = detect_layers(path)
+        effective_xref = contour_layer_xref
+        if effective_xref is None and layer_info.classification == "confident":
+            effective_xref = layer_info.contour_layer_xref
+
         drawings = _visible_drawings(page)
         if not drawings:
             raise ValueError(
                 "У файлі не знайдено векторного контуру порізки — "
                 "додайте векторні лінії, що визначають лінію різу"
             )
+
+        if effective_xref is not None:
+            # get_drawings(extended=True) reports the owning OCG's NAME (not
+            # xref) as each entry's "layer" key — "" for vectors on no layer.
+            # Verified it survives _load_with_all_layers_visible's reopen, so
+            # a cut layer that's OFF by default is still matched here.
+            xref_to_name = {l.xref: l.name for l in layer_info.layers}
+            target_name = xref_to_name.get(effective_xref)
+            if target_name is None:
+                raise ValueError("Вказаний шар контуру не знайдено у файлі")
+            drawings = [d for d in drawings if d.get("layer") == target_name]
+            if not drawings:
+                raise ValueError(
+                    f"На шарі «{target_name}» не знайдено векторного контуру порізки — "
+                    "перевірте вибір шару"
+                )
 
         page_box = page.trimbox  # falls back to MediaBox automatically when no
         # TrimBox is defined on the page (verified empirically) — same convention
@@ -475,11 +509,6 @@ def inspect_shape_pdf(path: str, bleed_mm: float) -> ShapeArtworkInfo:
             seen.add(key)
             deduped.append(sp)
         subpaths = deduped
-
-        # Diagnostic only — see detect_layers()'s own docstring. Reads the
-        # file's OCG layer names independently of everything computed above;
-        # does not change dim_w/dim_h/subpaths/anything else in this function.
-        layer_info = detect_layers(path)
 
         return ShapeArtworkInfo(
             dim_w=dim_w,

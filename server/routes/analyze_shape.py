@@ -14,6 +14,8 @@ from server.models import (
     LayerInfo,
     LayoutResult,
     ShapeAnalyzeResponse,
+    ShapeLayerPreviewRequest,
+    ShapeLayerPreviewResponse,
 )
 from server.utils.constants import DEFAULT_FIELD_MARGIN, DEFAULT_MARK_OFFSET, SHAPE_BLEED_MM, SHEET_PRESETS
 
@@ -97,3 +99,30 @@ async def analyze_shape(
         contour=contour,
         layer_info=layer_info,
     )
+
+
+@router.post("/api/analyze-shape-layer", response_model=ShapeLayerPreviewResponse)
+def analyze_shape_layer(payload: ShapeLayerPreviewRequest) -> ShapeLayerPreviewResponse:
+    try:
+        path, _ = session_store.get_upload(payload.upload_id)
+    except KeyError as exc:
+        raise HTTPException(404, exc.args[0]) from exc
+
+    try:
+        info = inspect_shape_pdf(path, payload.bleed_mm, contour_layer_xref=payload.contour_layer_xref)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    session_store.touch_upload(payload.upload_id)
+
+    contour = ContourGeometry(
+        subpaths=[
+            ContourSubpath(
+                start=sp.start,
+                segments=[ContourSegment(kind=seg.kind, points=list(seg.points)) for seg in sp.segments],
+                closed=sp.closed,
+            )
+            for sp in info.subpaths
+        ],
+    )
+    return ShapeLayerPreviewResponse(contour=contour)

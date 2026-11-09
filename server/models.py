@@ -123,11 +123,20 @@ class ShapeAnalyzeResponse(BaseModel):
     layout: LayoutResult
     thumbnail: str
     contour: ContourGeometry
-    # Diagnostic only — see server/core/shape_inspect.py's detect_layers().
-    # Does not change dim_w/dim_h/contour/thumbnail above; nothing consumes
-    # this yet (Prompt 2 will use it to restrict contour extraction and add
-    # a manual-override UI for the "ambiguous" case).
+    # See server/core/shape_inspect.py's detect_layers(). A "confident"
+    # verdict already restricted `contour` above to the detected layer; for
+    # "ambiguous" the frontend offers a manual pick (/api/analyze-shape-layer).
     layer_info: LayerDetectionInfo
+
+
+class ShapeLayerPreviewRequest(BaseModel):
+    upload_id: str
+    bleed_mm: float = Field(default=SHAPE_BLEED_MM, ge=0)
+    contour_layer_xref: int | None = None
+
+
+class ShapeLayerPreviewResponse(BaseModel):
+    contour: ContourGeometry
 
 
 class ShapeGenerateRequest(BaseModel):
@@ -152,6 +161,9 @@ class ShapeGenerateRequest(BaseModel):
     # draw_base_corner_guide.
     corner_mark: bool = False
     bleed_mm: float = Field(default=SHAPE_BLEED_MM, ge=0)
+    contour_layer_xref: int | None = None  # manual override; None = auto (see
+    # detect_layers' classification) or "every vector counts" when there's nothing
+    # to auto-detect. Diagnostic-only layer_info never changes; this is request-scoped.
     # No dim_w/dim_h/gap/deform — the server re-derives the authoritative size
     # and contour by re-running inspect_shape_pdf on the stored upload, and
     # gap is always 0 for this mode.
@@ -163,6 +175,8 @@ class ShapeBatchItem(BaseModel):
     cols: int | None = Field(default=None, ge=0)
     rows: int | None = Field(default=None, ge=0)
     quantity: int = Field(gt=0)
+    contour_layer_xref: int | None = None  # same meaning as above — per-item,
+    # since each file in a batch can have a completely different layer structure.
 
 
 class ShapeBatchGenerateRequest(BaseModel):

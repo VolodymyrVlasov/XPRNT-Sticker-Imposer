@@ -27,7 +27,7 @@ def generate_shape(payload: ShapeGenerateRequest, background_tasks: BackgroundTa
     # Never trust a client-supplied size for this mode — re-derive the
     # authoritative dim_w/dim_h and cut contour straight from the file.
     try:
-        info = inspect_shape_pdf(artwork_path, payload.bleed_mm)
+        info = inspect_shape_pdf(artwork_path, payload.bleed_mm, contour_layer_xref=payload.contour_layer_xref)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

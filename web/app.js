@@ -66,6 +66,8 @@ const propsCols = el("props-cols");
 const propsRows = el("props-rows");
 const propsQuantity = el("props-quantity");
 const propsModalError = el("props-modal-error");
+const propsLayerRow = el("props-layer-row");
+const propsLayerSelect = el("props-contour-layer");
 const propsCancelBtn = el("props-cancel");
 const propsApplyBtn = el("props-apply");
 
@@ -285,6 +287,8 @@ async function addFiles(files) {
         upload_id: data.upload_id, filename: data.filename,
         dim_w: data.dim_w, dim_h: data.dim_h, page_count: data.page_count,
         thumbnail: data.thumbnail, contour: data.contour || null,
+        layerInfo: data.layer_info || null,
+        contourLayerXref: null,
         orientation: null, cols: null, rows: null, quantity: 1,
         editDimW: null, editDimH: null, deform: false,
         layout: null, layoutError: null,
@@ -606,6 +610,17 @@ function openPropsModal(i) {
   propsCols.value = it.cols ?? "";
   propsRows.value = it.rows ?? "";
   propsQuantity.value = it.quantity;
+  const ambiguousLayers = shapeMode && it.layerInfo && it.layerInfo.classification === "ambiguous";
+  propsLayerRow.hidden = !ambiguousLayers;
+  if (ambiguousLayers) {
+    const roleLabel = { cut_contour: "ймовірно контур", print_content: "ймовірно друк" };
+    propsLayerSelect.innerHTML = '<option value="">Авто (усі вектори файлу)</option>' +
+      it.layerInfo.layers.map((l) => {
+        const hint = roleLabel[l.role] ? ` (${roleLabel[l.role]})` : "";
+        return `<option value="${l.xref}">${escapeHtml(l.name)}${hint}</option>`;
+      }).join("");
+    propsLayerSelect.value = it.contourLayerXref != null ? String(it.contourLayerXref) : "";
+  }
   propsModalError.hidden = true;
   propsModal.hidden = false;
 }
@@ -620,6 +635,40 @@ propsApplyBtn.addEventListener("click", async () => {
   const idx = propsIndex;
   if (idx === null) return;
   const it = items[idx];
+
+  // Manual cut-contour layer pick (ambiguous-layer files only). Refresh the
+  // contour from the server BEFORE committing anything else, so a bad pick
+  // (e.g. a layer with no vectors) keeps the modal open with nothing changed.
+  const newContourLayerXref = propsLayerRow.hidden
+    ? null
+    : (propsLayerSelect.value ? parseInt(propsLayerSelect.value, 10) : null);
+
+  if (newContourLayerXref !== it.contourLayerXref) {
+    try {
+      const res = await fetch("/api/analyze-shape-layer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          upload_id: it.upload_id,
+          bleed_mm: appliedParams.bleedMm,
+          contour_layer_xref: newContourLayerXref,
+        }),
+      });
+      if (!res.ok) {
+        const detail = (await res.json()).detail;
+        propsModalError.textContent = detail != null ? formatErrorDetail(detail) : "Помилка оновлення контуру";
+        propsModalError.hidden = false;
+        return; // keep the modal open, nothing committed yet
+      }
+      it.contour = (await res.json()).contour;
+      it.contourLayerXref = newContourLayerXref;
+    } catch (err) {
+      propsModalError.textContent = String(err.message || err);
+      propsModalError.hidden = false;
+      return;
+    }
+  }
+
   const cols = parseInt(propsCols.value, 10);
   const rows = parseInt(propsRows.value, 10);
   const draft = {
@@ -1109,6 +1158,7 @@ async function generateShapeBatch() {
   const payload = {
     items: items.map((it) => ({
       upload_id: it.upload_id, orientation: it.orientation, cols: it.cols, rows: it.rows, quantity: it.quantity,
+      contour_layer_xref: it.contourLayerXref,
     })),
     sheet_name: appliedParams.sheetName,
     sheet_w: appliedParams.sheetW,
