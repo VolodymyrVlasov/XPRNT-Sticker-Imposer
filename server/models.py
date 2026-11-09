@@ -3,6 +3,11 @@ from pydantic import BaseModel, Field
 from server.utils.constants import SHAPE_BLEED_MM
 
 
+class AppSettings(BaseModel):
+    extra_contour_keywords: list[str] = []
+    cut_contour_default: bool = True
+
+
 class LayoutInput(BaseModel):
     dim_w: float = Field(gt=0)
     dim_h: float = Field(gt=0)

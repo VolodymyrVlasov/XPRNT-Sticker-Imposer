@@ -96,6 +96,6 @@ def generate_batch(payload: BatchGenerateRequest, background_tasks: BackgroundTa
     return FileResponse(
         zip_path,
         media_type="application/zip",
-        filename=f"batch - {len(payload.items)} файлів.zip",
+        filename=f"{payload.order.strip() + ' - ' if payload.order.strip() else ''}batch - {len(payload.items)} файлів.zip",
         background=background_tasks,
     )

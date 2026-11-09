@@ -35,6 +35,14 @@ const paramsPendingHint = el("params-pending-hint");
 const paramsApplyBtn = el("params-apply-btn");
 
 const cutContourCheckbox = el("cut-contour-checkbox");
+const settingsBtn = el("settings-btn");
+const settingsModal = el("settings-modal");
+const settingsKeywordsList = el("settings-keywords-list");
+const settingsKeywordInput = el("settings-keyword-input");
+const settingsKeywordAddBtn = el("settings-keyword-add-btn");
+const settingsModalError = el("settings-modal-error");
+const settingsCancelBtn = el("settings-cancel");
+const settingsApplyBtn = el("settings-apply");
 const outlineCheckbox = el("outline-checkbox");
 
 const generateBtn = el("generate-btn");
@@ -434,7 +442,7 @@ async function startNewTask() {
   bleedMmInput.value = String(bleedDefault);
   paramsPendingHint.hidden = true;
 
-  cutContourCheckbox.checked = true;
+  cutContourCheckbox.checked = currentSettings.cut_contour_default;
   outlineCheckbox.checked = isStickerPack;
 
   orderNumberInput.value = "";
@@ -1189,6 +1197,89 @@ generateBtn.addEventListener("click", async () => {
   }
 });
 
+// ── settings (persistent, server-side — see server/utils/settings_store.py) ─
+
+let currentSettings = { extra_contour_keywords: [], cut_contour_default: true };
+let settingsDraftKeywords = [];
+let settingsCheckboxOnOpen = true;
+
+function renderSettingsKeywords() {
+  settingsKeywordsList.innerHTML = "";
+  settingsDraftKeywords.forEach((kw, i) => {
+    const chip = document.createElement("span");
+    chip.className = "settings-keyword-chip";
+    chip.innerHTML = `${escapeHtml(kw)} <button type="button" aria-label="Видалити">✕</button>`;
+    chip.querySelector("button").addEventListener("click", () => {
+      settingsDraftKeywords.splice(i, 1);
+      renderSettingsKeywords();
+    });
+    settingsKeywordsList.appendChild(chip);
+  });
+}
+
+async function loadSettings() {
+  const res = await fetch("/api/settings");
+  currentSettings = await res.json();
+  cutContourCheckbox.checked = currentSettings.cut_contour_default;
+}
+
+function openSettingsModal() {
+  settingsDraftKeywords = [...currentSettings.extra_contour_keywords];
+  // The checkbox is the live element (generate reads it directly), so
+  // remember its state to restore on Cancel — same "nothing committed until
+  // Apply" behavior as the keyword draft.
+  settingsCheckboxOnOpen = cutContourCheckbox.checked;
+  renderSettingsKeywords();
+  settingsKeywordInput.value = "";
+  settingsModalError.hidden = true;
+  settingsModal.hidden = false;
+}
+function closeSettingsModal() {
+  settingsModal.hidden = true;
+}
+settingsBtn.addEventListener("click", openSettingsModal);
+settingsCancelBtn.addEventListener("click", () => {
+  cutContourCheckbox.checked = settingsCheckboxOnOpen;
+  closeSettingsModal();
+});
+
+function addSettingsKeyword() {
+  const v = settingsKeywordInput.value.trim();
+  if (v && !settingsDraftKeywords.includes(v)) {
+    settingsDraftKeywords.push(v);
+    renderSettingsKeywords();
+  }
+  settingsKeywordInput.value = "";
+}
+settingsKeywordAddBtn.addEventListener("click", addSettingsKeyword);
+settingsKeywordInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); addSettingsKeyword(); }
+});
+
+settingsApplyBtn.addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        extra_contour_keywords: settingsDraftKeywords,
+        cut_contour_default: cutContourCheckbox.checked,
+      }),
+    });
+    if (!res.ok) {
+      const detail = (await res.json()).detail;
+      settingsModalError.textContent = detail != null ? formatErrorDetail(detail) : "Помилка збереження налаштувань";
+      settingsModalError.hidden = false;
+      return;
+    }
+    currentSettings = await res.json();
+    closeSettingsModal();
+  } catch (err) {
+    settingsModalError.textContent = String(err.message || err);
+    settingsModalError.hidden = false;
+  }
+});
+
 // ── init ──────────────────────────────────────────────────────────────────
 
 setSectionEnabled(cardPanelParams, false);
@@ -1196,3 +1287,4 @@ bleedRow.hidden = true;
 renderFileList();
 renderSelectedPreview();
 loadConfig();
+loadSettings();

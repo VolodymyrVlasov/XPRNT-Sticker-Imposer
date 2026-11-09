@@ -26,6 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from server.utils.constants import MM
+from server.utils.settings_store import load_settings
 
 # Tolerance (in PDF points) for treating two path endpoints as "the same point"
 # when grouping raw drawing items into subpaths / detecting closure.
@@ -118,7 +119,12 @@ def detect_layers(path: str) -> LayerDetectionResult:
     if len(layers) < 2:
         return LayerDetectionResult(classification="none", layers=layers, contour_layer_xref=None)
 
-    matches = [layer for layer in layers if _layer_matches(_normalize_layer_name(layer.name), _CONTOUR_KEYWORDS)]
+    # User-added keywords from the settings panel, normalized like layer names.
+    # Built per call on a COPY — the module-level _CONTOUR_KEYWORDS baseline
+    # is never mutated.
+    custom_keywords = load_settings().get("extra_contour_keywords", [])
+    contour_keywords = _CONTOUR_KEYWORDS + [_normalize_layer_name(kw) for kw in custom_keywords if kw.strip()]
+    matches = [layer for layer in layers if _layer_matches(_normalize_layer_name(layer.name), contour_keywords)]
 
     if len(matches) == 1:
         contour_layer = matches[0]
